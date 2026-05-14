@@ -1,0 +1,9 @@
+{
+  "css.customData": [".vscode/tailwind.json"],
+  "files.associations": {
+    "*.css": "css"
+  },
+  "editor.quickSuggestions": {
+    "strings": true
+  }
+}
