@@ -120,6 +120,8 @@ export const EmlUploader: React.FC<EmlUploaderProps> = ({ onMaterialsAdded }) =>
                             ? 'bg-slate-50 border-slate-200 text-slate-400'
                             : link.type === 'gdrive'
                             ? 'bg-blue-50 border-blue-200 text-blue-900 font-medium'
+                            : link.type === 'youtube'
+                            ? 'bg-rose-50 border-rose-200 text-rose-900 font-medium'
                             : 'bg-emerald-50 border-emerald-200 text-emerald-900 font-medium'
                         }`}
                       >
@@ -133,6 +135,11 @@ export const EmlUploader: React.FC<EmlUploaderProps> = ({ onMaterialsAdded }) =>
                         {link.gdriveId && (
                           <span className="text-[11px] bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-mono shrink-0">
                             GDrive ID: {link.gdriveId}
+                          </span>
+                        )}
+                        {link.youtubeId && (
+                          <span className="text-[11px] bg-rose-100 text-rose-800 px-2 py-0.5 rounded font-mono shrink-0">
+                            YouTube ID: {link.youtubeId}
                           </span>
                         )}
                         {link.isNoise && (

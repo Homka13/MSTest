@@ -8,6 +8,15 @@ export type MaterialStatus =
 
 export type MaterialCategory = 'material' | 'noise' | 'teams_report' | 'list';
 
+export type StorageTarget = 'gdrive' | 'sharepoint';
+
+export interface StorageConfig {
+  activeStorage: StorageTarget;
+  gdriveFolderUrl: string;
+  sharepointSiteUrl: string;
+  sharepointLibrary: string;
+}
+
 export interface TestOption {
   id: string;
   text: string;
@@ -35,8 +44,9 @@ export interface ParsedLink {
   id: string;
   rawUrl: string;
   cleanUrl: string;
-  type: 'gdrive' | 'unc' | 'external' | 'noise';
+  type: 'gdrive' | 'youtube' | 'unc' | 'external' | 'noise';
   gdriveId?: string;
+  youtubeId?: string;
   uncPath?: string;
   isNoise: boolean;
   noiseReason?: string;
@@ -99,7 +109,12 @@ export interface MaterialItem {
   pathOfOrigin: string;
   sha256?: string;
   gdriveId?: string;
+  youtubeId?: string;
+  externalUrl?: string;
   uncPath?: string;
+  storageTarget: StorageTarget; // 'gdrive' (поточне) або 'sharepoint' (заготоване)
+  storageUrl?: string;
+  sharepointPath?: string;
   isDuplicate?: boolean;
   duplicateOfId?: string;
   testData?: TestModel;

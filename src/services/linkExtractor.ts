@@ -106,6 +106,22 @@ function classifySingleUrl(rawUrl: string, cleanUrl: string): ParsedLink {
     };
   }
 
+  // YouTube та відео посилання: youtube.com, youtu.be, vimeo.com
+  if (lower.includes('youtube.com') || lower.includes('youtu.be') || lower.includes('vimeo.com')) {
+    let youtubeId: string | undefined;
+    const match = cleanUrl.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
+    if (match) youtubeId = match[1];
+
+    return {
+      id,
+      rawUrl,
+      cleanUrl,
+      type: 'youtube',
+      youtubeId,
+      isNoise: false,
+    };
+  }
+
   // Google Drive посилання: drive.google.com/file/d/<id>/view або docs.google.com/...
   if (lower.includes('drive.google.com') || lower.includes('docs.google.com')) {
     let gdriveId: string | undefined;

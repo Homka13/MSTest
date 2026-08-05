@@ -136,6 +136,8 @@ export async function parseEmlFile(
       conversationId,
       pathOfOrigin: attachment.pathOfOrigin,
       sha256,
+      storageTarget: 'gdrive',
+      storageUrl: 'https://drive.google.com/drive/folders/1QB5kDoofcb67yTvpSUlm47DgHufpy0dd',
       gdriveId: gdriveLink?.gdriveId,
       uncPath: uncLink?.uncPath,
       testData,

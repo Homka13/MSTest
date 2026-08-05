@@ -173,8 +173,27 @@ export const VerificationQueue: React.FC<VerificationQueueProps> = ({ materials,
                 <div className="space-y-1">
                   <p><span className="font-semibold text-slate-700">Дата надходження:</span> {item.receiveDate}</p>
                   {item.eventDate && <p><span className="font-semibold text-slate-700">Дата події/вебінару:</span> {item.eventDate}</p>}
+                  
+                  {/* Інформація про сховище */}
+                  <p className="flex items-center gap-1.5 mt-1">
+                    <span className="font-semibold text-slate-700">Сховище файлу:</span>
+                    <span className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
+                      item.storageTarget === 'sharepoint' 
+                        ? 'bg-emerald-100 text-emerald-800' 
+                        : 'bg-blue-100 text-blue-800'
+                    }`}>
+                      {item.storageTarget === 'sharepoint' ? '🏢 SharePoint Library' : '📁 Google Drive (Поточне)'}
+                    </span>
+                  </p>
+
                   {item.gdriveId && (
                     <p><span className="font-semibold text-blue-600">Google Drive ID:</span> <code className="bg-blue-50 px-1 rounded font-mono">{item.gdriveId}</code></p>
+                  )}
+                  {item.youtubeId && (
+                    <p><span className="font-semibold text-rose-600">YouTube Відео:</span> <a href={`https://youtube.com/watch?v=${item.youtubeId}`} target="_blank" rel="noreferrer" className="bg-rose-50 text-rose-700 px-1.5 py-0.5 rounded font-mono underline">watch?v={item.youtubeId}</a></p>
+                  )}
+                  {item.externalUrl && !item.gdriveId && !item.youtubeId && (
+                    <p><span className="font-semibold text-slate-700">Зовнішнє посилання:</span> <a href={item.externalUrl} target="_blank" rel="noreferrer" className="text-blue-600 underline truncate max-w-[200px] inline-block font-mono">{item.externalUrl}</a></p>
                   )}
                   {item.uncPath && (
                     <p><span className="font-semibold text-purple-600">UNC Шлях:</span> <code className="bg-purple-50 px-1 rounded font-mono">{item.uncPath}</code></p>
