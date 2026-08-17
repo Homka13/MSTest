@@ -8,7 +8,8 @@ import {
   CornerDownRight,
   Sparkles,
   Save,
-  Copy
+  Copy,
+  Clock
 } from 'lucide-react';
 
 interface VerificationQueueProps {
@@ -47,6 +48,7 @@ export const VerificationQueue: React.FC<VerificationQueueProps> = ({ materials,
           {[
             { key: 'ALL', label: 'Всі', count: materials.length },
             { key: 'UnderReview', label: 'На перевірці', count: materials.filter(m => m.status === 'UnderReview').length },
+            { key: 'PendingAccess', label: 'Очікує доступу', count: materials.filter(m => m.status === 'PendingAccess').length },
             { key: 'Parsed', label: 'Розібрано', count: materials.filter(m => m.status === 'Parsed').length },
             { key: 'Published', label: 'Опубліковано', count: materials.filter(m => m.status === 'Published').length },
             { key: 'Rejected', label: 'Відхилено', count: materials.filter(m => m.status === 'Rejected').length },
@@ -76,7 +78,7 @@ export const VerificationQueue: React.FC<VerificationQueueProps> = ({ materials,
         <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-500">
           <FileText size={48} className="mx-auto text-slate-300 mb-3" />
           <p className="font-semibold text-slate-700">У черзі немає матеріалів з обраним статусом</p>
-          <p className="text-sm text-slate-400 mt-1">Завантажте .eml листи або файли у вкладці "Завантаження & EML Парсер"</p>
+          <p className="text-sm text-slate-400 mt-1">Завантажте .eml листи або файли у вкладці "Додати матеріал"</p>
         </div>
       ) : (
         <div className="grid gap-4">
@@ -88,6 +90,8 @@ export const VerificationQueue: React.FC<VerificationQueueProps> = ({ materials,
                   ? 'border-emerald-200 bg-emerald-50/20' 
                   : item.status === 'UnderReview'
                   ? 'border-amber-300 bg-amber-50/20'
+                  : item.status === 'PendingAccess'
+                  ? 'border-purple-300 bg-purple-50/20'
                   : 'border-slate-200'
               }`}
             >
@@ -104,6 +108,13 @@ export const VerificationQueue: React.FC<VerificationQueueProps> = ({ materials,
                       {item.language}
                     </span>
 
+                    {/* Статус PendingAccess (0.3) */}
+                    {item.status === 'PendingAccess' && (
+                      <span className="px-2 py-0.5 bg-purple-100 text-purple-800 text-xs font-semibold rounded-full flex items-center gap-1">
+                        <Clock size={12} /> Очікує доступу
+                      </span>
+                    )}
+
                     {/* Індикатор впевненості */}
                     <span className={`px-2 py-0.5 rounded-full text-xs font-semibold flex items-center gap-1 ${
                       item.confidenceScore >= 80
@@ -115,10 +126,13 @@ export const VerificationQueue: React.FC<VerificationQueueProps> = ({ materials,
                       <Sparkles size={12} /> {item.confidenceScore}% впевненість
                     </span>
 
-                    {/* Дублікат */}
+                    {/* Дублікат (0.2) */}
                     {item.isDuplicate && (
-                      <span className="px-2 py-0.5 bg-purple-100 text-purple-800 text-xs font-semibold rounded-full flex items-center gap-1">
-                        <Copy size={12} /> Дублікат
+                      <span 
+                        title={item.remarks}
+                        className="px-2 py-0.5 bg-rose-100 text-rose-800 text-xs font-semibold rounded-full flex items-center gap-1 cursor-help"
+                      >
+                        <Copy size={12} /> Дублікат {item.duplicateOfId ? `(Оригінал: ${item.duplicateOfId})` : ''}
                       </span>
                     )}
                   </div>
@@ -127,6 +141,11 @@ export const VerificationQueue: React.FC<VerificationQueueProps> = ({ materials,
                   <p className="text-xs font-mono text-slate-500 bg-slate-100 px-2 py-1 rounded inline-block">
                     Нормалізоване ім'я: {item.normalizedName}
                   </p>
+                  {item.remarks && (
+                    <p className="text-xs text-rose-600 font-medium">
+                      ⚠️ {item.remarks}
+                    </p>
+                  )}
                 </div>
 
                 {/* Дії зі статусом */}
@@ -174,7 +193,6 @@ export const VerificationQueue: React.FC<VerificationQueueProps> = ({ materials,
                   <p><span className="font-semibold text-slate-700">Дата надходження:</span> {item.receiveDate}</p>
                   {item.eventDate && <p><span className="font-semibold text-slate-700">Дата події/вебінару:</span> {item.eventDate}</p>}
                   
-                  {/* Інформація про сховище */}
                   <p className="flex items-center gap-1.5 mt-1">
                     <span className="font-semibold text-slate-700">Сховище файлу:</span>
                     <span className={`px-2 py-0.5 rounded text-[11px] font-semibold ${

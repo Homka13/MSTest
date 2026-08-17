@@ -1,11 +1,11 @@
-import { ParsedEmail, ParsedAttachment, MaterialItem, EmailSenderInfo } from '../types';
+import { ParsedEmail, ParsedAttachment, MaterialItem, EmailSenderInfo, BrandMapping, TypeMarker, MaterialStatus } from '../types';
 import { extractAndClassifyLinks } from './linkExtractor';
 import { analyzeAttachmentNoise } from './noiseFilter';
-import { classifyMaterial } from './classifier';
+import { classifyMaterial, DEFAULT_BRANDS, DEFAULT_TYPE_MARKERS, DEFAULT_INTERNAL_DOMAINS } from './classifier';
 import { parseTestTxt } from './testParser';
 
 /**
- * Генеранція SHA-256 хешу в браузері
+ * Генерація SHA-256 хешу в браузері
  */
 export async function calculateSha256(buffer: ArrayBuffer): Promise<string> {
   try {
@@ -19,16 +19,18 @@ export async function calculateSha256(buffer: ArrayBuffer): Promise<string> {
 }
 
 /**
- * 2.3.1 Визначення фактичного джерела з блоків From: у тілі листа
+ * 2.3.1 Визначення фактичного джерела з блоків From: у тілі листа (з гнучкими внутрішніми доменами 2.3.2)
  */
-export function extractActualSender(headersSender: string, bodyText: string): EmailSenderInfo {
+export function extractActualSender(
+  headersSender: string,
+  bodyText: string,
+  internalDomains: string[] = DEFAULT_INTERNAL_DOMAINS
+): EmailSenderInfo {
   let actualSender = headersSender;
-  
-  // Шукаємо первинні блоки Від: / From: в ланцюгу пересилань FW: / RE:
+
   const fromMatches = Array.from(bodyText.matchAll(/(?:From|Від):\s*([^<\r\n]+(?:<[^>\r\n]+>)?)/gi));
-  
+
   if (fromMatches.length > 0) {
-    // Беремо найпершого автора з глибини ланцюга (останній знайдений From: у тексті)
     const oldestFrom = fromMatches[fromMatches.length - 1][1].trim();
     if (oldestFrom) {
       actualSender = oldestFrom;
@@ -38,8 +40,8 @@ export function extractActualSender(headersSender: string, bodyText: string): Em
   const domainMatch = actualSender.match(/@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
   const domain = domainMatch ? domainMatch[1].toLowerCase() : '';
 
-  // Класифікація джерела: зовнішній чи внутрішній (2.3.2)
-  const isExternal = !domain.includes('company.com') && !domain.includes('internal.org');
+  // Класифікація джерела за довідником внутрішніх доменів (2.3.2)
+  const isExternal = domain ? !internalDomains.some(d => domain.includes(d.toLowerCase())) : true;
 
   return {
     headersSender,
@@ -50,19 +52,29 @@ export function extractActualSender(headersSender: string, bodyText: string): Em
 }
 
 /**
- * 2.2 Рекурсивний розбір .eml текстового або бінарного файлу
+ * 2.2 Рекурсивний розбір .eml текстового або бінарного файлу з динамічними довідниками (0.1, 0.3, 0.4)
  */
 export async function parseEmlFile(
   file: File,
   depth: number = 0,
   maxDepth: number = 3,
-  parentPath: string = 'Кореневий лист'
+  parentPath: string = 'Кореневий лист',
+  options?: {
+    brands?: BrandMapping[];
+    typeMarkers?: TypeMarker[];
+    noiseHashes?: string[];
+    internalDomains?: string[];
+  }
 ): Promise<{ email: ParsedEmail; materials: MaterialItem[] }> {
+  const activeBrands = options?.brands || DEFAULT_BRANDS;
+  const activeTypeMarkers = options?.typeMarkers || DEFAULT_TYPE_MARKERS;
+  const activeNoiseHashes = options?.noiseHashes;
+  const activeInternalDomains = options?.internalDomains || DEFAULT_INTERNAL_DOMAINS;
+
   const text = await file.text();
   const internetMessageId = `msg_${Math.random().toString(36).substring(2, 10)}@mail.domain`;
   const conversationId = `conv_${file.name.replace(/[^a-zA-Z0-9]/g, '_')}`;
-  
-  // Простий парсинг заголовків EML
+
   const subjectMatch = text.match(/^Subject:\s*(.+)$/m);
   const fromMatch = text.match(/^From:\s*(.+)$/m);
   const dateMatch = text.match(/^Date:\s*(.+)$/m);
@@ -71,24 +83,28 @@ export async function parseEmlFile(
   const headersSender = fromMatch ? fromMatch[1].trim() : 'admin@training.center';
   const receiveDate = dateMatch ? new Date(dateMatch[1]).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
 
-  const sender = extractActualSender(headersSender, text);
+  const sender = extractActualSender(headersSender, text, activeInternalDomains);
   const links = extractAndClassifyLinks(text);
 
   const attachments: ParsedAttachment[] = [];
   const materials: MaterialItem[] = [];
   const nestedEmails: ParsedEmail[] = [];
 
-  // Перевірка рекурсивного обмеження (2.2.2)
   if (depth >= maxDepth) {
     console.warn(`Досягнуто ліміт глибини рекурсії (${maxDepth}) для ${file.name}`);
   }
 
-  // Для демонстрації створюємо розпізнане вкладення з файлу або його вмісту
   const isTestTxt = file.name.endsWith('.txt');
   const buffer = await file.arrayBuffer();
   const sha256 = await calculateSha256(buffer);
-  
-  const noiseAnalysis = analyzeAttachmentNoise(file.name, file.type || 'application/octet-stream', file.size, sha256);
+
+  const noiseAnalysis = analyzeAttachmentNoise(
+    file.name,
+    file.type || 'application/octet-stream',
+    file.size,
+    sha256,
+    activeNoiseHashes
+  );
 
   const attachment: ParsedAttachment = {
     id: `att_${Math.random().toString(36).substring(2, 9)}`,
@@ -105,18 +121,28 @@ export async function parseEmlFile(
 
   attachments.push(attachment);
 
-  // Якщо файл є навчальним матеріалом — класифікуємо його
   if (!attachment.isNoise && attachment.category === 'material') {
-    const classification = classifyMaterial(file.name, subject, text);
-    let testData;
+    const classification = classifyMaterial(
+      file.name,
+      subject,
+      text,
+      activeBrands,
+      activeTypeMarkers
+    );
 
+    let testData;
     if (isTestTxt) {
       testData = parseTestTxt(text, file.name);
     }
 
-    // Google Drive посилання з листа
     const gdriveLink = links.find(l => l.type === 'gdrive');
     const uncLink = links.find(l => l.type === 'unc');
+
+    // 0.3 Статус "очікує доступу" (PendingAccess) для зовнішніх Drive або UNC-посилань (2.4.7)
+    let initialStatus: MaterialStatus = classification.confidenceScore >= 75 ? 'Parsed' : 'UnderReview';
+    if (uncLink || (gdriveLink && sender.isExternal)) {
+      initialStatus = 'PendingAccess';
+    }
 
     const materialItem: MaterialItem = {
       id: `mat_${Math.random().toString(36).substring(2, 9)}`,
@@ -131,7 +157,7 @@ export async function parseEmlFile(
       receiveDate,
       trainerSource: sender.actualSender,
       confidenceScore: classification.confidenceScore,
-      status: classification.confidenceScore >= 75 ? 'Parsed' : 'UnderReview',
+      status: initialStatus,
       sourceEmailId: internetMessageId,
       conversationId,
       pathOfOrigin: attachment.pathOfOrigin,
@@ -143,6 +169,7 @@ export async function parseEmlFile(
       testData,
       fileSizeBytes: file.size,
       category: attachment.category,
+      remarks: initialStatus === 'PendingAccess' ? 'Матеріал очікує перевірки доступності зовнішнього посилання або UNC шляху' : undefined,
     };
 
     materials.push(materialItem);

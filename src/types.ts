@@ -134,3 +134,11 @@ export interface TypeMarker {
   typeName: string;
   priority: number;
 }
+
+export interface TestParserConfig {
+  correctMarker: string;
+  incorrectMarker: string;
+  questionRegex?: RegExp;
+  ignoredLines?: string[];
+}
+

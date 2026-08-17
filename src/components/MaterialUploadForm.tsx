@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { parseEmlFile } from '../services/emlParser';
-import { DEFAULT_BRANDS } from '../services/classifier';
 import { parseTestTxt } from '../services/testParser';
-import { MaterialItem, ParsedEmail } from '../types';
+import { checkDuplicateMaterial } from '../services/deduplication';
+import { MaterialItem, ParsedEmail, BrandMapping, TypeMarker, MaterialStatus } from '../types';
 import { useMsal } from '@azure/msal-react';
 import { 
   Upload, 
@@ -21,12 +21,23 @@ import {
   Check
 } from 'lucide-react';
 
-
 interface MaterialUploadFormProps {
   onMaterialCreated: (material: MaterialItem) => void;
+  brands: BrandMapping[];
+  typeMarkers: TypeMarker[];
+  noiseHashes: string[];
+  internalDomains: string[];
+  existingMaterials: MaterialItem[];
 }
 
-export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({ onMaterialCreated }) => {
+export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({
+  onMaterialCreated,
+  brands,
+  typeMarkers,
+  noiseHashes,
+  internalDomains,
+  existingMaterials,
+}) => {
   const { accounts } = useMsal();
   const activeAccount = accounts[0];
 
@@ -34,7 +45,7 @@ export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({ onMateri
 
   // Стан форми
   const [title, setTitle] = useState('');
-  const [brand, setBrand] = useState('Lancôme');
+  const [brand, setBrand] = useState(brands[0]?.brandName || 'Lancôme');
   const [customBrand, setCustomBrand] = useState('');
   const [type, setType] = useState('Курс');
   const [language, setLanguage] = useState('UKR');
@@ -49,34 +60,36 @@ export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({ onMateri
   const [isProcessingEml, setIsProcessingEml] = useState(false);
   const [confidenceScore, setConfidenceScore] = useState(90);
 
-  // Підставляємо ім'я тренера з MSAL за наявності
   useEffect(() => {
     if (activeAccount && !trainer) {
       setTrainer(activeAccount.name || activeAccount.username || '');
     }
   }, [activeAccount]);
 
-  // Розрахунок нормалізованої назви за шаблоном з ТЗ (2.11.1): {Бренд}_{Продукт}_{Тип}_{Мова}_{РРРР-ММ-ДД}
   const effectiveBrand = brand === 'Other' ? (customBrand || 'Brand') : brand;
   const cleanBrand = effectiveBrand.replace(/[^a-zA-Z0-9А-Яа-яІіЇїЄє]/g, '');
   const cleanTitle = (title || 'Material').replace(/[^a-zA-Z0-9А-Яа-яІіЇїЄє]/g, '');
   const cleanType = type.replace(/[^a-zA-Z0-9А-Яа-яІіЇїЄє]/g, '');
   const fileExt = files.length > 0 && files[0].name.includes('.') ? `.${files[0].name.split('.').pop()}` : '.pdf';
-  
+
   const normalizedFilenamePreview = `${cleanBrand}_${cleanTitle}_${cleanType}_${language}_${eventDate}${fileExt}`;
 
-  // Обробка завантаження .eml листа
+  // Обробка завантаження .eml листа з передачею довідників
   const handleEmlUpload = async (file: File) => {
     setIsProcessingEml(true);
     try {
-      const { email, materials } = await parseEmlFile(file);
+      const { email, materials } = await parseEmlFile(file, 0, 3, 'Кореневий лист', {
+        brands,
+        typeMarkers,
+        noiseHashes,
+        internalDomains,
+      });
       setParsedEmail(email);
-
 
       if (materials.length > 0) {
         const mat = materials[0];
         setTitle(mat.title || mat.product || file.name.replace(/\.[^/.]+$/, ''));
-        setBrand(mat.brand || 'Lancôme');
+        setBrand(mat.brand || brands[0]?.brandName || 'Lancôme');
         setType(mat.type || 'Курс');
         setLanguage(mat.language || 'UKR');
         if (mat.trainerSource) setTrainer(mat.trainerSource);
@@ -84,7 +97,6 @@ export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({ onMateri
         setConfidenceScore(mat.confidenceScore || 85);
       }
 
-      // Шукаємо Google Drive або UNC посилання в листі
       const gDrive = email.links.find(l => l.type === 'gdrive');
       if (gDrive) {
         setDriveUrl(gDrive.cleanUrl);
@@ -114,7 +126,6 @@ export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({ onMateri
     setFiles(files.filter((_, i) => i !== index));
   };
 
-  // Відправка форми та створення матеріалу
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -141,8 +152,16 @@ export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({ onMateri
       }
     }
 
-    const newMaterial: MaterialItem = {
-      id: `mat_${Math.random().toString(36).substring(2, 9)}`,
+    const isUnc = driveUrl.startsWith('\\\\');
+    const hasAttachedFile = files.length > 0;
+
+    // 0.3 Статус PendingAccess якщо доступний тільки за посиланням/UNC без локального файла
+    let initialStatus: MaterialStatus = 'Parsed';
+    if (!hasAttachedFile && (gdriveId || isUnc || externalUrl)) {
+      initialStatus = 'PendingAccess';
+    }
+
+    const draftMaterial: Partial<MaterialItem> = {
       title: title || 'Новий матеріал',
       originalName: firstFile ? firstFile.name : (title || 'Документ'),
       normalizedName: normalizedFilenamePreview,
@@ -154,14 +173,14 @@ export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({ onMateri
       receiveDate: new Date().toISOString().split('T')[0],
       trainerSource: trainer || activeAccount?.name || 'Адміністратор',
       confidenceScore: uploadMode === 'eml' ? confidenceScore : 100,
-      status: 'Parsed',
+      status: initialStatus,
       sourceEmailId: parsedEmail ? parsedEmail.internetMessageId : 'manual_entry',
       conversationId: parsedEmail ? parsedEmail.conversationId : `conv_${Date.now()}`,
       pathOfOrigin: parsedEmail ? `EML Лист (${parsedEmail.subject}) -> ${firstFile?.name || 'Посилання'}` : 'Ручне завантаження через форму',
       gdriveId,
       youtubeId,
       externalUrl,
-      uncPath: driveUrl.startsWith('\\\\') ? driveUrl : undefined,
+      uncPath: isUnc ? driveUrl : undefined,
       storageTarget: 'gdrive',
       storageUrl: 'https://drive.google.com/drive/folders/1QB5kDoofcb67yTvpSUlm47DgHufpy0dd',
       sharepointPath: `Shared Documents/Materials/${normalizedFilenamePreview}`,
@@ -170,9 +189,24 @@ export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({ onMateri
       category: 'material',
     };
 
+    // 0.2 Перевірка дублікатів (gdriveId, sha256, URL, UNC)
+    const dedupResult = checkDuplicateMaterial(draftMaterial, existingMaterials);
+
+    const newMaterial: MaterialItem = {
+      ...draftMaterial as MaterialItem,
+      id: `mat_${Math.random().toString(36).substring(2, 9)}`,
+      isDuplicate: dedupResult.isDuplicate,
+      duplicateOfId: dedupResult.duplicateOfId,
+      remarks: dedupResult.isDuplicate ? dedupResult.duplicateReason : undefined,
+    };
+
     onMaterialCreated(newMaterial);
 
-    alert(`Матеріал "${newMaterial.normalizedName}" успішно додано до каталогу та черги!`);
+    if (dedupResult.isDuplicate) {
+      alert(`Увага! Матеріал позначено як ДУБЛІКАТ: ${dedupResult.duplicateReason}`);
+    } else {
+      alert(`Матеріал "${newMaterial.normalizedName}" успішно додано!`);
+    }
 
     // Скидання форми
     setTitle('');
@@ -213,7 +247,6 @@ export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({ onMateri
         </button>
       </div>
 
-      {/* Зона завантаження EML якщо вибрано режим EML */}
       {uploadMode === 'eml' && (
         <div
           onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
@@ -249,7 +282,6 @@ export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({ onMateri
         </div>
       )}
 
-      {/* Головна форма введення атрибутів матеріалу */}
       <form onSubmit={handleSubmit} className="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-slate-200 space-y-6">
         
         <div className="flex items-center justify-between border-b pb-4">
@@ -258,7 +290,6 @@ export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({ onMateri
             Атрибути та класифікація матеріалу
           </h2>
 
-          {/* ЖИВА ПРЕВ'Ю-ПЛАШКА НОРМАЛІЗОВАНОГО ІМЕНІ (п. 2.11.1 ТЗ) */}
           <div className="hidden lg:flex items-center gap-2 bg-slate-900 text-slate-100 px-3.5 py-1.5 rounded-xl font-mono text-xs shadow-inner">
             <Sparkles size={14} className="text-amber-400 shrink-0" />
             <span>Нормалізоване ім'я: </span>
@@ -266,7 +297,6 @@ export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({ onMateri
           </div>
         </div>
 
-        {/* ПРЕВ'Ю ДЛЯ МОБІЛЬНИХ */}
         <div className="lg:hidden bg-slate-900 text-slate-100 p-3 rounded-xl font-mono text-xs space-y-1">
           <p className="text-amber-400 font-semibold flex items-center gap-1">
             <Sparkles size={12} /> Згенероване нормалізоване ім'я:
@@ -276,7 +306,7 @@ export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({ onMateri
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
-          {/* Назва матеріалу / Продукт */}
+          {/* Назва матеріалу */}
           <div className="space-y-2">
             <label className="block text-sm font-semibold text-slate-700 flex items-center gap-1.5">
               <FileText size={16} className="text-slate-400" /> Назва матеріалу / Продукт
@@ -301,7 +331,7 @@ export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({ onMateri
               onChange={(e) => setBrand(e.target.value)}
               className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm transition bg-white"
             >
-              {DEFAULT_BRANDS.map(b => (
+              {brands.map(b => (
                 <option key={b.brandName} value={b.brandName}>{b.brandName}</option>
               ))}
               <option value="Other">Інший бренд...</option>
@@ -318,7 +348,7 @@ export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({ onMateri
             )}
           </div>
 
-          {/* Тип матеріалу (з ТЗ) */}
+          {/* Тип матеріалу */}
           <div className="space-y-2">
             <label className="block text-sm font-semibold text-slate-700 flex items-center gap-1.5">
               <Layers size={16} className="text-slate-400" /> Тип навчального матеріалу
@@ -354,7 +384,7 @@ export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({ onMateri
             </select>
           </div>
 
-          {/* Тренер / Постачальник */}
+          {/* Тренер */}
           <div className="space-y-2">
             <label className="block text-sm font-semibold text-slate-700 flex items-center gap-1.5">
               <UserCheck size={16} className="text-slate-400" /> Хто тренер / Постачальник
@@ -369,7 +399,7 @@ export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({ onMateri
             />
           </div>
 
-          {/* Дата події / вебінару */}
+          {/* Дата події */}
           <div className="space-y-2">
             <label className="block text-sm font-semibold text-slate-700 flex items-center gap-1.5">
               <Calendar size={16} className="text-slate-400" /> Дата події / вебінару
@@ -384,7 +414,7 @@ export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({ onMateri
 
         </div>
 
-        {/* Зовнішні посилання (Google Drive / YouTube / UNC шлях) */}
+        {/* Зовнішні посилання */}
         <div className="space-y-2 border-t pt-6">
           <label className="block text-sm font-semibold text-slate-700 flex items-center gap-1.5">
             <Link2 size={16} className="text-slate-400" /> Посилання на зовнішній контент (Google Drive, YouTube вебінар, UNC-шара тощо)
@@ -396,12 +426,9 @@ export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({ onMateri
             placeholder="https://youtube.com/watch?v=... або https://drive.google.com/... або \\fs1\projects\..."
             className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm font-mono transition"
           />
-          <p className="text-xs text-slate-500">
-            Підтримуються будь-які зовнішні посилання: Google Drive, відеозаписи YouTube/Vimeo, посилання на вебінари та мережеві UNC-папки.
-          </p>
         </div>
 
-        {/* Drag & Drop зона для прикріплення файлів */}
+        {/* Файли */}
         <div className="space-y-2 border-t pt-6">
           <label className="block text-sm font-semibold text-slate-700">Файли навчального матеріалу</label>
           
@@ -427,7 +454,6 @@ export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({ onMateri
             </p>
           </div>
 
-          {/* Список вибраних файлів */}
           {files.length > 0 && (
             <div className="mt-3 space-y-2">
               {files.map((f, idx) => (
@@ -450,7 +476,6 @@ export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({ onMateri
           )}
         </div>
 
-        {/* Кнопка опублікувати / зберегти */}
         <div className="flex justify-end pt-4 border-t">
           <button
             type="submit"

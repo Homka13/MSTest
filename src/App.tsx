@@ -7,6 +7,7 @@ import { TestParserView } from './components/TestParserView';
 import { VerificationQueue } from './components/VerificationQueue';
 import { DictionarySettings } from './components/DictionarySettings';
 import { MaterialItem } from './types';
+import { materialRepo, AppSettings } from './services/repository';
 import { 
   PlusCircle,
   FileText, 
@@ -22,76 +23,6 @@ import {
   RotateCcw
 } from 'lucide-react';
 
-const INITIAL_DEMO_MATERIALS: MaterialItem[] = [
-  {
-    id: 'demo_1',
-    title: 'HA + Peptide Курс',
-    originalName: 'E. Arden - HA + Peptide Курс.pdf',
-    normalizedName: 'ElizabethArden_HAPeptide_Курс_UKR_2026-05-04.pdf',
-    type: 'Курс',
-    brand: 'Elizabeth Arden',
-    product: 'HA + Peptide',
-    language: 'UKR',
-    eventDate: '2026-05-04',
-    receiveDate: '2026-05-05',
-    trainerSource: 'tanya.kuzmenko@vendor.com',
-    confidenceScore: 85,
-    status: 'UnderReview',
-    sourceEmailId: 'msg_001@mail.domain',
-    conversationId: 'conv_e_arden_ha_peptide',
-    pathOfOrigin: 'Кореневий лист -> E. Arden - HA + Peptide Курс.pdf',
-    fileSizeBytes: 2450000,
-    category: 'material',
-    storageTarget: 'gdrive',
-    storageUrl: 'https://drive.google.com/drive/folders/1QB5kDoofcb67yTvpSUlm47DgHufpy0dd',
-  },
-  {
-    id: 'demo_2',
-    title: 'ADGH Eau De Parfum Intense Pocket Memo',
-    originalName: 'GA_2026 ADGH EAU DE PARFUM INTENSE POCKET MEMO_ukr.pdf',
-    normalizedName: 'GiorgioArmani_ADGHEauDeParfumIntense_Памятка_UKR_2026-05-06.pdf',
-    type: 'Пам\'ятка',
-    brand: 'Giorgio Armani',
-    product: 'ADGH Eau De Parfum Intense',
-    language: 'UKR',
-    eventDate: '2026-05-06',
-    receiveDate: '2026-05-07',
-    trainerSource: 'armani.trainings@loreal.com',
-    confidenceScore: 92,
-    status: 'Parsed',
-    sourceEmailId: 'msg_002@mail.domain',
-    conversationId: 'conv_armani_webinar_may2026',
-    pathOfOrigin: 'Кореневий лист -> Вкладений лист #1 -> GA_2026 ADGH...pdf',
-    fileSizeBytes: 1850000,
-    category: 'material',
-    gdriveId: '1QB5kDoofcb67yTvpSUlm47DgHufpy0dd',
-    storageTarget: 'gdrive',
-    storageUrl: 'https://drive.google.com/drive/folders/1QB5kDoofcb67yTvpSUlm47DgHufpy0dd',
-  },
-  {
-    id: 'demo_3',
-    title: 'Тест до курсу HA + Peptide',
-    originalName: 'HA_Peptide_Test.txt',
-    normalizedName: 'ElizabethArden_HAPeptide_Тест_UKR_2026-05-04.txt',
-    type: 'Тест',
-    brand: 'Elizabeth Arden',
-    product: 'HA + Peptide',
-    language: 'UKR',
-    eventDate: '2026-05-04',
-    receiveDate: '2026-05-05',
-    trainerSource: 'tanya.kuzmenko@vendor.com',
-    confidenceScore: 95,
-    status: 'Published',
-    sourceEmailId: 'msg_001@mail.domain',
-    conversationId: 'conv_e_arden_ha_peptide',
-    pathOfOrigin: 'Кореневий лист -> HA_Peptide_Test.txt',
-    fileSizeBytes: 3200,
-    category: 'material',
-    storageTarget: 'gdrive',
-    storageUrl: 'https://drive.google.com/drive/folders/1QB5kDoofcb67yTvpSUlm47DgHufpy0dd',
-  }
-];
-
 const App = () => {
   const { instance, accounts } = useMsal();
   const msalAuthenticated = useIsAuthenticated();
@@ -100,6 +31,12 @@ const App = () => {
   const activeAccount = instance.getActiveAccount() || accounts[0] || allAccounts[0] || null;
 
   const [forceUpdateTick, setForceUpdateTick] = useState(0);
+
+  // Стан матеріалів з репозиторію
+  const [materials, setMaterials] = useState<MaterialItem[]>(() => materialRepo.getMaterials());
+
+  // Стан довідників з репозиторію (0.1, 0.4, Stage 1)
+  const [appSettings, setAppSettings] = useState<AppSettings>(() => materialRepo.getSettings());
 
   useEffect(() => {
     const callbackId = instance.addEventCallback((event) => {
@@ -117,8 +54,6 @@ const App = () => {
     };
   }, [instance]);
 
-
-
   useEffect(() => {
     if (!instance.getActiveAccount() && allAccounts.length > 0) {
       instance.setActiveAccount(allAccounts[0]);
@@ -126,14 +61,22 @@ const App = () => {
   }, [allAccounts, instance, forceUpdateTick]);
 
   const [activeTab, setActiveTab] = useState<'form' | 'test_parser' | 'queue' | 'settings'>('form');
-  const [materials, setMaterials] = useState<MaterialItem[]>(INITIAL_DEMO_MATERIALS);
 
   const handleMaterialCreated = (newMaterial: MaterialItem) => {
-    setMaterials(prev => [newMaterial, ...prev]);
+    const updated = materialRepo.saveMaterial(newMaterial);
+    setMaterials(updated);
   };
 
-  const handleUpdateMaterial = (updated: MaterialItem) => {
-    setMaterials(prev => prev.map(m => m.id === updated.id ? updated : m));
+  const handleUpdateMaterial = (updatedItem: MaterialItem) => {
+    const updated = materialRepo.updateMaterial(updatedItem);
+    setMaterials(updated);
+  };
+
+  // Оновлення та збереження довідників
+  const updateSettings = (newSettings: Partial<AppSettings>) => {
+    const merged = { ...appSettings, ...newSettings };
+    setAppSettings(merged);
+    materialRepo.saveSettings(merged);
   };
 
   const signIn = () => {
@@ -146,11 +89,9 @@ const App = () => {
     instance.logoutRedirect().catch(error => console.error("Помилка виходу:", error));
   };
 
-  // ЕКРАН АВТОРИЗАЦІЇ (якщо користувач НЕ авторизований — блокуємо доступ до завантаження)
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col justify-center items-center p-4 relative overflow-hidden font-sans">
-        {/* Фоновий ефект */}
         <div className="absolute -top-40 -left-40 w-96 h-96 bg-blue-600/20 rounded-full blur-3xl"></div>
         <div className="absolute -bottom-40 -right-40 w-96 h-96 bg-indigo-600/20 rounded-full blur-3xl"></div>
 
@@ -283,7 +224,7 @@ const App = () => {
                 <CheckSquare size={18} />
                 <span>Черга на перевірці</span>
                 <span className="bg-blue-600 text-white text-[11px] px-2 py-0.2 rounded-full">
-                  {materials.filter(m => m.status === 'UnderReview').length}
+                  {materials.filter(m => m.status === 'UnderReview' || m.status === 'PendingAccess').length}
                 </span>
               </button>
 
@@ -327,7 +268,6 @@ const App = () => {
       {/* Головний контент */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-8">
         
-        {/* Статус авторизації */}
         <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 p-4 rounded-2xl flex items-center justify-between text-sm shadow-sm">
           <div className="flex items-center space-x-3">
             <div className="p-2 bg-emerald-100 rounded-xl text-emerald-700">
@@ -361,7 +301,7 @@ const App = () => {
             onClick={() => setActiveTab('queue')}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap ${activeTab === 'queue' ? 'bg-blue-600 text-white' : 'bg-slate-100'}`}
           >
-            📋 Черга ({materials.filter(m => m.status === 'UnderReview').length})
+            📋 Черга ({materials.filter(m => m.status === 'UnderReview' || m.status === 'PendingAccess').length})
           </button>
           <button 
             onClick={() => setActiveTab('settings')}
@@ -373,7 +313,14 @@ const App = () => {
 
         {/* Контент активної вкладки */}
         {activeTab === 'form' && (
-          <MaterialUploadForm onMaterialCreated={handleMaterialCreated} />
+          <MaterialUploadForm 
+            onMaterialCreated={handleMaterialCreated}
+            brands={appSettings.brands}
+            typeMarkers={appSettings.typeMarkers}
+            noiseHashes={appSettings.noiseHashes}
+            internalDomains={appSettings.internalDomains}
+            existingMaterials={materials}
+          />
         )}
 
         {activeTab === 'test_parser' && (
@@ -388,7 +335,18 @@ const App = () => {
         )}
 
         {activeTab === 'settings' && (
-          <DictionarySettings />
+          <DictionarySettings 
+            brands={appSettings.brands}
+            onUpdateBrands={(b) => updateSettings({ brands: b })}
+            typeMarkers={appSettings.typeMarkers}
+            onUpdateTypeMarkers={(m) => updateSettings({ typeMarkers: m })}
+            noiseHashes={appSettings.noiseHashes}
+            onUpdateNoiseHashes={(h) => updateSettings({ noiseHashes: h })}
+            storageConfig={appSettings.storageConfig}
+            onUpdateStorageConfig={(c) => updateSettings({ storageConfig: c })}
+            internalDomains={appSettings.internalDomains}
+            onUpdateInternalDomains={(d) => updateSettings({ internalDomains: d })}
+          />
         )}
 
       </main>

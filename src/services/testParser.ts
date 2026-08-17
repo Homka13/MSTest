@@ -1,12 +1,29 @@
-import { TestModel, TestQuestion, TestOption } from '../types';
+import { TestModel, TestQuestion, TestOption, TestParserConfig } from '../types';
+
+export const DEFAULT_TEST_PARSER_CONFIG: TestParserConfig = {
+  correctMarker: '(!)',
+  incorrectMarker: '(?)',
+  questionRegex: /^(\d+)[\.\)]\s*(.+)/,
+  ignoredLines: [
+    'начало формы',
+    'початок форми',
+    'конец формы',
+    'кінець форми',
+    'раздел',
+    'розділ',
+    'page break',
+    '---',
+  ],
+};
 
 /**
- * Парсер тестів з .txt файлів згідно з п. 2.8 ТЗ:
- * Рядок "N.Текст питання", далі варіанти з префіксами:
- * (!) - правильна відповідь
- * (?) - неправильна відповідь
+ * 2.8 Парсер тестів з .txt файлів з конфігурацією та розширеною валідацією (2.8.4, 2.8.5)
  */
-export function parseTestTxt(rawText: string, filename: string = 'test.txt'): TestModel {
+export function parseTestTxt(
+  rawText: string,
+  filename: string = 'test.txt',
+  config: TestParserConfig = DEFAULT_TEST_PARSER_CONFIG
+): TestModel {
   let text = rawText;
   let hasBOM = false;
 
@@ -22,6 +39,12 @@ export function parseTestTxt(rawText: string, filename: string = 'test.txt'): Te
 
   let currentQuestion: Partial<TestQuestion> | null = null;
   let questionCounter = 0;
+  let lastDeclaredQuestionNum = 0;
+
+  const questionRegex = config.questionRegex || DEFAULT_TEST_PARSER_CONFIG.questionRegex!;
+  const ignoredLines = config.ignoredLines || DEFAULT_TEST_PARSER_CONFIG.ignoredLines!;
+  const correctMarker = config.correctMarker || '(!)';
+  const incorrectMarker = config.incorrectMarker || '(?)';
 
   for (let i = 0; i < lines.length; i++) {
     const rawLine = lines[i];
@@ -29,11 +52,16 @@ export function parseTestTxt(rawText: string, filename: string = 'test.txt'): Te
 
     if (!line) continue;
 
-    // Перевіряємо чи рядок є початком нового питання: "1. Текст", "1) Текст" або просто цифра з крапкою
-    const questionMatch = line.match(/^(\d+)[\.\)]\s*(.+)/);
-    
+    // 2.8.4 Відсіювання службових рядків Word ("Начало формы", "Конец формы" тощо)
+    const lineLower = line.toLowerCase();
+    if (ignoredLines.some(ignored => lineLower.includes(ignored.toLowerCase()))) {
+      continue;
+    }
+
+    // Перевіряємо чи рядок є початком нового питання: "1. Текст", "1) Текст"
+    const questionMatch = line.match(questionRegex);
+
     if (questionMatch) {
-      // Зберігаємо попереднє питання перед початком нового
       if (currentQuestion) {
         finalizeQuestion(currentQuestion, questions);
       }
@@ -42,22 +70,29 @@ export function parseTestTxt(rawText: string, filename: string = 'test.txt'): Te
       const qNum = parseInt(questionMatch[1], 10);
       const qText = questionMatch[2].trim();
 
+      const questionWarnings: string[] = [];
+
+      // 2.8.4 Перевірка розривів у нумерації питань
+      if (lastDeclaredQuestionNum > 0 && qNum > lastDeclaredQuestionNum + 1) {
+        questionWarnings.push(`Попередження: Пропущено нумерацію (після #${lastDeclaredQuestionNum} іде #${qNum})`);
+      }
+      lastDeclaredQuestionNum = qNum;
+
       currentQuestion = {
         id: qNum || questionCounter,
         questionText: qText,
         options: [],
-        warnings: [],
+        warnings: questionWarnings,
       };
       continue;
     }
 
-    // Перевіряємо варіанти відповідей: (!) або (?)
-    const isCorrectOption = line.startsWith('(!)');
-    const isIncorrectOption = line.startsWith('(?)');
+    // Перевіряємо варіанти відповідей згідно з конфігом
+    const isCorrectOption = line.startsWith(correctMarker);
+    const isIncorrectOption = line.startsWith(incorrectMarker);
 
     if (isCorrectOption || isIncorrectOption) {
       if (!currentQuestion) {
-        // Запитання не було оголошено явно, створюємо безназваний контейнер
         questionCounter++;
         currentQuestion = {
           id: questionCounter,
@@ -67,7 +102,8 @@ export function parseTestTxt(rawText: string, filename: string = 'test.txt'): Te
         };
       }
 
-      const optionText = line.substring(3).trim();
+      const markerLength = isCorrectOption ? correctMarker.length : incorrectMarker.length;
+      const optionText = line.substring(markerLength).trim();
       const option: TestOption = {
         id: `q${currentQuestion.id}_opt${(currentQuestion.options?.length || 0) + 1}`,
         text: optionText,
@@ -79,13 +115,12 @@ export function parseTestTxt(rawText: string, filename: string = 'test.txt'): Te
       continue;
     }
 
-    // Якщо це звичайний рядок і ми всередині питання — додаємо його до тексту питання
+    // Звичайний рядок — приклеюємо до тексту питання
     if (currentQuestion && (!currentQuestion.options || currentQuestion.options.length === 0)) {
       currentQuestion.questionText += ` ${line}`;
     }
   }
 
-  // Завершуємо останнє питання
   if (currentQuestion) {
     finalizeQuestion(currentQuestion, questions);
   }
@@ -111,7 +146,6 @@ function finalizeQuestion(q: Partial<TestQuestion>, questions: TestQuestion[]) {
   const incorrectCount = options.filter(o => !o.isCorrect).length;
   const warnings: string[] = q.warnings || [];
 
-  // 2.8.4 Валідація тесту: кожне питання має мати щонайменше 1 правильну і 1 неправильну відповідь
   if (correctCount === 0) {
     warnings.push('Попередження: Не знайдено жодної правильної відповіді (!)');
   }

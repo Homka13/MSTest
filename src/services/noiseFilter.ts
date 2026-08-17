@@ -1,9 +1,8 @@
 import { MaterialCategory } from '../types';
 
-// Чорний список хешів SHA-256 (наприклад, логотипи корпоративних підписів)
+// Чорний список хешів SHA-256 за замовчуванням (наприклад, порожній файл та логотипи)
 export const KNOWN_NOISE_HASHES = new Set<string>([
   'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', // Порожній файл
-  // Додаткові хеші логотипів підписів додаються в налаштуваннях
 ]);
 
 export interface NoiseAnalysisResult {
@@ -13,22 +12,27 @@ export interface NoiseAnalysisResult {
 }
 
 /**
- * 2.5 Фільтрація службових вкладень та класифікація артефактів
+ * 2.5 Фільтрація службових вкладень та класифікація артефактів з підтримкою динамічного довідника
  */
 export function analyzeAttachmentNoise(
   filename: string,
   contentType: string,
   sizeBytes: number,
-  sha256Hash?: string
+  sha256Hash?: string,
+  customNoiseHashes?: string[] | Set<string>
 ): NoiseAnalysisResult {
   const lowerName = filename.toLowerCase();
 
-  // 1. Перевірка за хешем SHA-256
-  if (sha256Hash && KNOWN_NOISE_HASHES.has(sha256Hash)) {
+  // 1. Перевірка за хешем SHA-256 (динамічний або системний список)
+  const activeHashes = customNoiseHashes 
+    ? (customNoiseHashes instanceof Set ? customNoiseHashes : new Set(customNoiseHashes))
+    : KNOWN_NOISE_HASHES;
+
+  if (sha256Hash && activeHashes.has(sha256Hash.toLowerCase())) {
     return {
       isNoise: true,
       category: 'noise',
-      noiseReason: 'Зафіксовано в чорному списку SHA-256 (корпоративний логотип)',
+      noiseReason: 'Зафіксовано в чорному списку SHA-256 (корпоративний логотип / шум)',
     };
   }
 
@@ -36,7 +40,6 @@ export function analyzeAttachmentNoise(
   const isImage = contentType.startsWith('image/') || /\.(png|jpe?g|gif|ico|svg)$/i.test(filename);
 
   if (isImage) {
-    // Зображення з шаблонами іменування підписів Outlook / Teams
     const isSignaturePattern = 
       /^img-[a-f0-9-]+\.(png|jpg|jpeg)$/i.test(filename) ||
       /^image\d{3}\.(png|jpg|jpeg)$/i.test(filename) ||
@@ -59,7 +62,7 @@ export function analyzeAttachmentNoise(
     lowerName.includes('attendance')
   ) {
     return {
-      isNoise: false, // Не ігнорується повністю, але виділяється в службовий артефакт
+      isNoise: false,
       category: 'teams_report',
       noiseReason: 'Звіт відвідуваності Teams (зберігається окремо для звітності)',
     };

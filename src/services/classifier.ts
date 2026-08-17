@@ -1,5 +1,8 @@
 import { BrandMapping, TypeMarker } from '../types';
 
+// Керований довідник внутрішніх доменів (2.3.2)
+export const DEFAULT_INTERNAL_DOMAINS: string[] = ['loreal.com', 'loreal.ua', 'vendor.com', 'internal.org'];
+
 // Керовані довідники брендів
 export const DEFAULT_BRANDS: BrandMapping[] = [
   { domainOrKeyword: 'loreal.com', brandName: 'Lancôme', aliases: ['lancome', 'ланком', 'loreal'] },
@@ -57,8 +60,9 @@ export function classifyMaterial(
   for (const b of brands) {
     const isDomainMatch = b.domainOrKeyword && combinedText.includes(b.domainOrKeyword.toLowerCase());
     const isAliasMatch = b.aliases.some(alias => {
-      const regex = new RegExp(`\\b${escapeRegExp(alias)}\\b`, 'i');
-      return regex.test(filename) || regex.test(emailSubject);
+      const cleanAlias = alias.toLowerCase();
+      const pattern = new RegExp(`(?:^|[^a-zA-Z0-9А-Яа-яІіЇїЄє])${escapeRegExp(cleanAlias)}(?:$|[^a-zA-Z0-9А-Яа-яІіЇїЄє])`, 'i');
+      return pattern.test(filename) || pattern.test(emailSubject) || combinedText.includes(cleanAlias);
     });
 
     if (isAliasMatch || isDomainMatch) {
@@ -82,10 +86,10 @@ export function classifyMaterial(
 
   if (highestPriority < 100) {
     for (const marker of typeMarkers) {
-      const regex = new RegExp(`\\b${escapeRegExp(marker.keyword)}\\b`, 'i');
-      const inFilename = regex.test(filename);
-      const inSubject = regex.test(emailSubject);
-      const inBody = regex.test(emailBody);
+      const pattern = new RegExp(`(?:^|[^a-zA-Z0-9А-Яа-яІіЇїЄє])${escapeRegExp(marker.keyword)}(?:$|[^a-zA-Z0-9А-Яа-яІіЇїЄє])`, 'i');
+      const inFilename = pattern.test(filename);
+      const inSubject = pattern.test(emailSubject);
+      const inBody = combinedText.includes(marker.keyword.toLowerCase());
 
       if (inFilename || inSubject || inBody) {
         if (marker.priority > highestPriority) {
@@ -99,25 +103,33 @@ export function classifyMaterial(
 
   // 3. Визначення мови матеріалу (2.7.3)
   let language = 'UKR';
-  if (/_eng\b|_en\b|english/i.test(filename)) {
+  if (/(?:_|-|\b)(?:eng|en|english)(?:_|-|\b)/i.test(filename)) {
     language = 'ENG';
-  } else if (/_ukr\b|_ua\b|ukrainian/i.test(filename)) {
+  } else if (/(?:_|-|\b)(?:ukr|ua|ukrainian)(?:_|-|\b)/i.test(filename)) {
     language = 'UKR';
   }
 
-  // 4. Витяг дати події (2.7.4)
+  // 4. Витяг дати події (2.7.4) - Підтримка ISO YYYY-MM-DD та DD.MM.YYYY
   let eventDate: string | undefined;
-  const dateMatch = combinedText.match(/\b(\d{1,2})[\.\/-](\d{1,2})[\.\/-](\d{2,4})\b/);
-  if (dateMatch) {
-    const day = dateMatch[1].padStart(2, '0');
-    const month = dateMatch[2].padStart(2, '0');
-    let year = dateMatch[3];
-    if (year.length === 2) year = `20${year}`;
+  const isoMatch = combinedText.match(/(?:^|[^0-9])(20\d{2})[\.\/-](\d{1,2})[\.\/-](\d{1,2})(?:$|[^0-9])/);
+  if (isoMatch) {
+    const year = isoMatch[1];
+    const month = isoMatch[2].padStart(2, '0');
+    const day = isoMatch[3].padStart(2, '0');
     eventDate = `${year}-${month}-${day}`;
   } else {
-    const yearMatch = combinedText.match(/\b(202\d)\b/);
-    if (yearMatch) {
-      eventDate = `${yearMatch[1]}-01-01`;
+    const dateMatch = combinedText.match(/(?:^|[^0-9])(\d{1,2})[\.\/-](\d{1,2})[\.\/-](\d{2,4})(?:$|[^0-9])/);
+    if (dateMatch) {
+      const day = dateMatch[1].padStart(2, '0');
+      const month = dateMatch[2].padStart(2, '0');
+      let year = dateMatch[3];
+      if (year.length === 2) year = `20${year}`;
+      eventDate = `${year}-${month}-${day}`;
+    } else {
+      const yearMatch = combinedText.match(/\b(202\d)\b/);
+      if (yearMatch) {
+        eventDate = `${yearMatch[1]}-01-01`;
+      }
     }
   }
 

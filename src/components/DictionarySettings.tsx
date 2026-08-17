@@ -1,54 +1,83 @@
 import React, { useState } from 'react';
-import { DEFAULT_BRANDS, DEFAULT_TYPE_MARKERS } from '../services/classifier';
-import { KNOWN_NOISE_HASHES } from '../services/noiseFilter';
 import { BrandMapping, TypeMarker, StorageConfig } from '../types';
-import { Settings, Plus, Trash2, Tag, ShieldAlert, HardDrive, CheckCircle2, Cloud } from 'lucide-react';
+import { Settings, Plus, Trash2, Tag, ShieldAlert, HardDrive, CheckCircle2, Cloud, Globe } from 'lucide-react';
 
-export const DictionarySettings: React.FC = () => {
-  const [brands, setBrands] = useState<BrandMapping[]>(DEFAULT_BRANDS);
-  const [typeMarkers, setTypeMarkers] = useState<TypeMarker[]>(DEFAULT_TYPE_MARKERS);
-  const [noiseHashes, setNoiseHashes] = useState<string[]>(Array.from(KNOWN_NOISE_HASHES));
+interface DictionarySettingsProps {
+  brands: BrandMapping[];
+  onUpdateBrands: (brands: BrandMapping[]) => void;
+  typeMarkers: TypeMarker[];
+  onUpdateTypeMarkers: (markers: TypeMarker[]) => void;
+  noiseHashes: string[];
+  onUpdateNoiseHashes: (hashes: string[]) => void;
+  storageConfig: StorageConfig;
+  onUpdateStorageConfig: (config: StorageConfig) => void;
+  internalDomains: string[];
+  onUpdateInternalDomains: (domains: string[]) => void;
+}
 
-  // Конфігурація сховища (Google Drive тимчасове / SharePoint заготоване)
-  const [storageConfig, setStorageConfig] = useState<StorageConfig>({
-    activeStorage: 'gdrive',
-    gdriveFolderUrl: 'https://drive.google.com/drive/folders/1QB5kDoofcb67yTvpSUlm47DgHufpy0dd',
-    sharepointSiteUrl: 'https://company.sharepoint.com/sites/EduPortal',
-    sharepointLibrary: 'Shared Documents/Materials',
-  });
-
+export const DictionarySettings: React.FC<DictionarySettingsProps> = ({
+  brands,
+  onUpdateBrands,
+  typeMarkers,
+  onUpdateTypeMarkers,
+  noiseHashes,
+  onUpdateNoiseHashes,
+  storageConfig,
+  onUpdateStorageConfig,
+  internalDomains,
+  onUpdateInternalDomains,
+}) => {
   const [newBrand, setNewBrand] = useState({ brandName: '', domainOrKeyword: '', aliasesStr: '' });
   const [newMarker, setNewMarker] = useState({ keyword: '', typeName: 'Курс', priority: 10 });
   const [newHash, setNewHash] = useState('');
+  const [newDomain, setNewDomain] = useState('');
 
   const handleAddBrand = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newBrand.brandName) return;
     const aliases = newBrand.aliasesStr.split(',').map(a => a.trim()).filter(Boolean);
-    setBrands([...brands, { brandName: newBrand.brandName, domainOrKeyword: newBrand.domainOrKeyword, aliases }]);
+    onUpdateBrands([...brands, { brandName: newBrand.brandName, domainOrKeyword: newBrand.domainOrKeyword, aliases }]);
     setNewBrand({ brandName: '', domainOrKeyword: '', aliasesStr: '' });
   };
 
   const handleDeleteBrand = (index: number) => {
-    setBrands(brands.filter((_, i) => i !== index));
+    onUpdateBrands(brands.filter((_, i) => i !== index));
   };
 
   const handleAddMarker = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMarker.keyword) return;
-    setTypeMarkers([...typeMarkers, { ...newMarker }]);
+    onUpdateTypeMarkers([...typeMarkers, { ...newMarker }]);
     setNewMarker({ keyword: '', typeName: 'Курс', priority: 10 });
   };
 
   const handleDeleteMarker = (index: number) => {
-    setTypeMarkers(typeMarkers.filter((_, i) => i !== index));
+    onUpdateTypeMarkers(typeMarkers.filter((_, i) => i !== index));
   };
 
   const handleAddHash = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newHash) return;
-    setNoiseHashes([...noiseHashes, newHash.trim().toLowerCase()]);
+    onUpdateNoiseHashes([...noiseHashes, newHash.trim().toLowerCase()]);
     setNewHash('');
+  };
+
+  const handleDeleteHash = (index: number) => {
+    onUpdateNoiseHashes(noiseHashes.filter((_, i) => i !== index));
+  };
+
+  const handleAddDomain = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newDomain) return;
+    const cleanDomain = newDomain.trim().toLowerCase().replace(/^@/, '');
+    if (!internalDomains.includes(cleanDomain)) {
+      onUpdateInternalDomains([...internalDomains, cleanDomain]);
+    }
+    setNewDomain('');
+  };
+
+  const handleDeleteDomain = (domainToDelete: string) => {
+    onUpdateInternalDomains(internalDomains.filter(d => d !== domainToDelete));
   };
 
   return (
@@ -62,7 +91,7 @@ export const DictionarySettings: React.FC = () => {
           <div>
             <h2 className="text-xl font-bold text-slate-800">Довідники та налаштування сховища</h2>
             <p className="text-sm text-slate-500">
-              Конфігурація цільових сховищ (Google Drive / SharePoint), брендів та маркерів класифікації.
+              Конфігурація цільових сховищ (Google Drive / SharePoint), брендів, внутрішніх доменів та маркерів класифікації.
             </p>
           </div>
         </div>
@@ -84,7 +113,7 @@ export const DictionarySettings: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Картка Google Drive */}
           <div 
-            onClick={() => setStorageConfig({ ...storageConfig, activeStorage: 'gdrive' })}
+            onClick={() => onUpdateStorageConfig({ ...storageConfig, activeStorage: 'gdrive' })}
             className={`p-5 rounded-xl border-2 transition-all cursor-pointer space-y-3 ${
               storageConfig.activeStorage === 'gdrive' 
                 ? 'border-blue-500 bg-blue-50/40 shadow-sm' 
@@ -107,7 +136,7 @@ export const DictionarySettings: React.FC = () => {
               <input
                 type="text"
                 value={storageConfig.gdriveFolderUrl}
-                onChange={e => setStorageConfig({ ...storageConfig, gdriveFolderUrl: e.target.value })}
+                onChange={e => onUpdateStorageConfig({ ...storageConfig, gdriveFolderUrl: e.target.value })}
                 className="w-full px-3 py-2 text-xs border rounded-lg font-mono outline-none bg-white"
               />
             </div>
@@ -115,7 +144,7 @@ export const DictionarySettings: React.FC = () => {
 
           {/* Картка SharePoint */}
           <div 
-            onClick={() => setStorageConfig({ ...storageConfig, activeStorage: 'sharepoint' })}
+            onClick={() => onUpdateStorageConfig({ ...storageConfig, activeStorage: 'sharepoint' })}
             className={`p-5 rounded-xl border-2 transition-all cursor-pointer space-y-3 ${
               storageConfig.activeStorage === 'sharepoint' 
                 ? 'border-emerald-500 bg-emerald-50/40 shadow-sm' 
@@ -139,7 +168,7 @@ export const DictionarySettings: React.FC = () => {
                 <input
                   type="text"
                   value={storageConfig.sharepointSiteUrl}
-                  onChange={e => setStorageConfig({ ...storageConfig, sharepointSiteUrl: e.target.value })}
+                  onChange={e => onUpdateStorageConfig({ ...storageConfig, sharepointSiteUrl: e.target.value })}
                   className="w-full px-3 py-2 text-xs border rounded-lg font-mono outline-none bg-white"
                 />
               </div>
@@ -148,12 +177,52 @@ export const DictionarySettings: React.FC = () => {
                 <input
                   type="text"
                   value={storageConfig.sharepointLibrary}
-                  onChange={e => setStorageConfig({ ...storageConfig, sharepointLibrary: e.target.value })}
+                  onChange={e => onUpdateStorageConfig({ ...storageConfig, sharepointLibrary: e.target.value })}
                   className="w-full px-3 py-2 text-xs border rounded-lg font-mono outline-none bg-white"
                 />
               </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* ВНУТРІШНІ ДОМЕНИ ОРГАНІЗАЦІЇ (0.4) */}
+      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+        <h3 className="font-bold text-slate-800 text-base flex items-center gap-2 border-b pb-3">
+          <Globe size={18} className="text-indigo-600" /> Довідник внутрішніх доменів організації ({internalDomains.length})
+        </h3>
+        <p className="text-xs text-slate-500">
+          Використовується для визначення фактичного відправника (внутрішній чи зовнішній тренер).
+        </p>
+
+        <form onSubmit={handleAddDomain} className="flex gap-3 text-xs">
+          <input
+            type="text"
+            placeholder="Введіть домен (наприклад: company.com)"
+            value={newDomain}
+            onChange={e => setNewDomain(e.target.value)}
+            className="flex-1 px-3 py-2 border rounded-xl outline-none font-mono"
+          />
+          <button
+            type="submit"
+            className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-4 py-2 rounded-xl transition flex items-center gap-1 shrink-0"
+          >
+            <Plus size={14} /> Додати домен
+          </button>
+        </form>
+
+        <div className="flex flex-wrap gap-2 pt-1">
+          {internalDomains.map((domain, idx) => (
+            <span key={idx} className="px-3 py-1 bg-indigo-50 border border-indigo-200 text-indigo-900 rounded-lg text-xs font-mono flex items-center gap-2">
+              <span>@{domain}</span>
+              <button
+                onClick={() => handleDeleteDomain(domain)}
+                className="text-slate-400 hover:text-rose-600"
+              >
+                ✕
+              </button>
+            </span>
+          ))}
         </div>
       </div>
 
@@ -305,7 +374,7 @@ export const DictionarySettings: React.FC = () => {
             <div key={idx} className="p-2.5 bg-rose-50/50 border border-rose-200 rounded-xl flex items-center justify-between text-xs font-mono text-rose-900">
               <span className="truncate mr-2">{hash}</span>
               <button
-                onClick={() => setNoiseHashes(noiseHashes.filter((_, i) => i !== idx))}
+                onClick={() => handleDeleteHash(idx)}
                 className="text-slate-400 hover:text-rose-600 p-1 shrink-0"
               >
                 <Trash2 size={14} />
