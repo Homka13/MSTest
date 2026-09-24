@@ -1,4 +1,4 @@
-import { MaterialItem, BrandMapping, TypeMarker, StorageConfig } from '../types';
+import { MaterialItem, BrandMapping, TypeMarker, StorageConfig, TeamsConfig } from '../types';
 import { DEFAULT_BRANDS, DEFAULT_TYPE_MARKERS, DEFAULT_INTERNAL_DOMAINS } from './classifier';
 import { KNOWN_NOISE_HASHES } from './noiseFilter';
 
@@ -8,6 +8,7 @@ export interface AppSettings {
   noiseHashes: string[];
   internalDomains: string[];
   storageConfig: StorageConfig;
+  teamsConfig: TeamsConfig;
 }
 
 export interface MaterialRepository {
@@ -37,6 +38,8 @@ const INITIAL_DEMO_MATERIALS: MaterialItem[] = [
     language: 'UKR',
     eventDate: '2026-05-04',
     receiveDate: '2026-05-05',
+    trainer: 'Тетяна Кузьменко',
+    importer: 'Brocard-Ukraine',
     trainerSource: 'tanya.kuzmenko@vendor.com',
     confidenceScore: 85,
     status: 'UnderReview',
@@ -59,6 +62,8 @@ const INITIAL_DEMO_MATERIALS: MaterialItem[] = [
     language: 'UKR',
     eventDate: '2026-05-06',
     receiveDate: '2026-05-07',
+    trainer: 'Armani Training Team',
+    importer: "L'Oréal Ukraine",
     trainerSource: 'armani.trainings@loreal.com',
     confidenceScore: 92,
     status: 'Parsed',
@@ -82,6 +87,8 @@ const INITIAL_DEMO_MATERIALS: MaterialItem[] = [
     language: 'UKR',
     eventDate: '2026-05-04',
     receiveDate: '2026-05-05',
+    trainer: 'Тетяна Кузьменко',
+    importer: 'Brocard-Ukraine',
     trainerSource: 'tanya.kuzmenko@vendor.com',
     confidenceScore: 95,
     status: 'Published',
@@ -143,12 +150,25 @@ export class LocalStorageMaterialRepository implements MaterialRepository {
         sharepointSiteUrl: 'https://company.sharepoint.com/sites/EduPortal',
         sharepointLibrary: 'Shared Documents/Materials',
       },
+      teamsConfig: {
+        enabled: false,
+        webhookUrl: '',
+        notifyPendingAccessOnly: false,
+      },
     };
 
     try {
       const stored = localStorage.getItem(STORAGE_KEYS.SETTINGS);
       if (stored) {
-        return { ...defaults, ...JSON.parse(stored) };
+        const parsed = JSON.parse(stored);
+        return {
+          ...defaults,
+          ...parsed,
+          teamsConfig: {
+            ...defaults.teamsConfig,
+            ...(parsed.teamsConfig || {}),
+          },
+        };
       }
     } catch (e) {
       console.warn('Failed to load settings from localStorage:', e);

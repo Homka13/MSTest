@@ -8,6 +8,7 @@ import { VerificationQueue } from './components/VerificationQueue';
 import { DictionarySettings } from './components/DictionarySettings';
 import { MaterialItem } from './types';
 import { materialRepo, AppSettings } from './services/repository';
+import { useUserRole } from './services/authRoles';
 import { 
   PlusCircle,
   FileText, 
@@ -16,6 +17,7 @@ import {
   LogIn, 
   LogOut,
   ShieldCheck,
+  ShieldAlert,
   Lock,
   UserCheck,
   CheckCircle2,
@@ -60,7 +62,18 @@ const App = () => {
     }
   }, [allAccounts, instance, forceUpdateTick]);
 
+  // Рольова модель Microsoft Entra ID (App Roles)
+  const userRoleInfo = useUserRole();
+  const { isAdmin } = userRoleInfo;
+
   const [activeTab, setActiveTab] = useState<'form' | 'test_parser' | 'queue' | 'settings'>('form');
+
+  // Автоматичне перенаправлення, якщо користувач без прав Admin потрапив на закриту вкладку
+  useEffect(() => {
+    if (!isAdmin && (activeTab === 'queue' || activeTab === 'settings')) {
+      setActiveTab('form');
+    }
+  }, [isAdmin, activeTab]);
 
   const handleMaterialCreated = (newMaterial: MaterialItem) => {
     const updated = materialRepo.saveMaterial(newMaterial);
@@ -213,32 +226,37 @@ const App = () => {
                 <span>Парсер Тестів (.txt)</span>
               </button>
 
-              <button
-                onClick={() => setActiveTab('queue')}
-                className={`px-4 py-2 rounded-xl text-sm font-medium transition flex items-center gap-2 ${
-                  activeTab === 'queue'
-                    ? 'bg-blue-50 text-blue-600 font-semibold'
-                    : 'text-slate-600 hover:text-blue-600 hover:bg-slate-50'
-                }`}
-              >
-                <CheckSquare size={18} />
-                <span>Черга на перевірці</span>
-                <span className="bg-blue-600 text-white text-[11px] px-2 py-0.2 rounded-full">
-                  {materials.filter(m => m.status === 'UnderReview' || m.status === 'PendingAccess').length}
-                </span>
-              </button>
+              {/* Адміністративні вкладки (лише для Admin / LMS.Admin в Entra ID) */}
+              {isAdmin && (
+                <>
+                  <button
+                    onClick={() => setActiveTab('queue')}
+                    className={`px-4 py-2 rounded-xl text-sm font-medium transition flex items-center gap-2 ${
+                      activeTab === 'queue'
+                        ? 'bg-blue-50 text-blue-600 font-semibold'
+                        : 'text-slate-600 hover:text-blue-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    <CheckSquare size={18} />
+                    <span>Черга на перевірці</span>
+                    <span className="bg-blue-600 text-white text-[11px] px-2 py-0.2 rounded-full">
+                      {materials.filter(m => m.status === 'UnderReview' || m.status === 'PendingAccess').length}
+                    </span>
+                  </button>
 
-              <button
-                onClick={() => setActiveTab('settings')}
-                className={`px-4 py-2 rounded-xl text-sm font-medium transition flex items-center gap-2 ${
-                  activeTab === 'settings'
-                    ? 'bg-blue-50 text-blue-600 font-semibold'
-                    : 'text-slate-600 hover:text-blue-600 hover:bg-slate-50'
-                }`}
-              >
-                <Settings size={18} />
-                <span>Довідники</span>
-              </button>
+                  <button
+                    onClick={() => setActiveTab('settings')}
+                    className={`px-4 py-2 rounded-xl text-sm font-medium transition flex items-center gap-2 ${
+                      activeTab === 'settings'
+                        ? 'bg-blue-50 text-blue-600 font-semibold'
+                        : 'text-slate-600 hover:text-blue-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    <Settings size={18} />
+                    <span>Довідники</span>
+                  </button>
+                </>
+              )}
             </nav>
           </div>
 
@@ -246,12 +264,17 @@ const App = () => {
           <div className="flex items-center space-x-4">
             <div className="flex items-center space-x-3 bg-slate-100 p-1.5 pl-3 rounded-full border border-slate-200">
               <div className="flex items-center space-x-2">
-                <div className="w-7 h-7 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold text-xs">
+                <div className={`w-7 h-7 text-white rounded-full flex items-center justify-center font-bold text-xs ${isAdmin ? 'bg-indigo-600' : 'bg-blue-600'}`}>
                   {(activeAccount?.name || activeAccount?.username || 'U').charAt(0).toUpperCase()}
                 </div>
-                <span className="text-sm font-medium text-slate-800 max-w-[140px] truncate hidden sm:inline">
-                  {activeAccount?.name || activeAccount?.username}
-                </span>
+                <div className="flex flex-col">
+                  <span className="text-xs font-bold text-slate-800 max-w-[130px] truncate hidden sm:inline">
+                    {activeAccount?.name || activeAccount?.username}
+                  </span>
+                  <span className={`text-[10px] font-semibold hidden sm:inline ${isAdmin ? 'text-indigo-600' : 'text-slate-500'}`}>
+                    {isAdmin ? 'Адміністратор' : 'Тренер'}
+                  </span>
+                </div>
               </div>
               <button 
                 onClick={signOut}
@@ -274,7 +297,12 @@ const App = () => {
               <ShieldCheck size={20} />
             </div>
             <div>
-              <p className="font-bold">{activeAccount?.name}</p>
+              <div className="flex items-center gap-2">
+                <p className="font-bold">{activeAccount?.name}</p>
+                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${isAdmin ? 'bg-indigo-100 text-indigo-800 border border-indigo-200' : 'bg-blue-100 text-blue-800 border border-blue-200'}`}>
+                  {isAdmin ? '👑 Адміністратор' : '🎓 Тренер'}
+                </span>
+              </div>
               <p className="text-xs text-emerald-700">{activeAccount?.username}</p>
             </div>
           </div>
@@ -297,18 +325,22 @@ const App = () => {
           >
             📝 Тести (.txt)
           </button>
-          <button 
-            onClick={() => setActiveTab('queue')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap ${activeTab === 'queue' ? 'bg-blue-600 text-white' : 'bg-slate-100'}`}
-          >
-            📋 Черга ({materials.filter(m => m.status === 'UnderReview' || m.status === 'PendingAccess').length})
-          </button>
-          <button 
-            onClick={() => setActiveTab('settings')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap ${activeTab === 'settings' ? 'bg-blue-600 text-white' : 'bg-slate-100'}`}
-          >
-            ⚙️ Довідники
-          </button>
+          {isAdmin && (
+            <>
+              <button 
+                onClick={() => setActiveTab('queue')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap ${activeTab === 'queue' ? 'bg-blue-600 text-white' : 'bg-slate-100'}`}
+              >
+                📋 Черга ({materials.filter(m => m.status === 'UnderReview' || m.status === 'PendingAccess').length})
+              </button>
+              <button 
+                onClick={() => setActiveTab('settings')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap ${activeTab === 'settings' ? 'bg-blue-600 text-white' : 'bg-slate-100'}`}
+              >
+                ⚙️ Довідники
+              </button>
+            </>
+          )}
         </div>
 
         {/* Контент активної вкладки */}
@@ -320,6 +352,7 @@ const App = () => {
             noiseHashes={appSettings.noiseHashes}
             internalDomains={appSettings.internalDomains}
             existingMaterials={materials}
+            teamsConfig={appSettings.teamsConfig}
           />
         )}
 
@@ -328,25 +361,51 @@ const App = () => {
         )}
 
         {activeTab === 'queue' && (
-          <VerificationQueue 
-            materials={materials} 
-            onUpdateMaterial={handleUpdateMaterial} 
-          />
+          isAdmin ? (
+            <VerificationQueue 
+              materials={materials} 
+              onUpdateMaterial={handleUpdateMaterial} 
+            />
+          ) : (
+            <div className="bg-white border border-amber-200 rounded-2xl p-8 text-center space-y-3 shadow-sm">
+              <div className="w-12 h-12 bg-amber-100 text-amber-600 rounded-2xl flex items-center justify-center mx-auto">
+                <ShieldAlert size={28} />
+              </div>
+              <p className="text-base font-bold text-slate-800">Доступ обмежено</p>
+              <p className="text-sm text-slate-500 max-w-md mx-auto">
+                Черга на перевірці призначена лише для адміністраторів порталу. Ваші матеріали успішно надходять відповідальним фахівцям.
+              </p>
+            </div>
+          )
         )}
 
         {activeTab === 'settings' && (
-          <DictionarySettings 
-            brands={appSettings.brands}
-            onUpdateBrands={(b) => updateSettings({ brands: b })}
-            typeMarkers={appSettings.typeMarkers}
-            onUpdateTypeMarkers={(m) => updateSettings({ typeMarkers: m })}
-            noiseHashes={appSettings.noiseHashes}
-            onUpdateNoiseHashes={(h) => updateSettings({ noiseHashes: h })}
-            storageConfig={appSettings.storageConfig}
-            onUpdateStorageConfig={(c) => updateSettings({ storageConfig: c })}
-            internalDomains={appSettings.internalDomains}
-            onUpdateInternalDomains={(d) => updateSettings({ internalDomains: d })}
-          />
+          isAdmin ? (
+            <DictionarySettings 
+              brands={appSettings.brands}
+              onUpdateBrands={(b) => updateSettings({ brands: b })}
+              typeMarkers={appSettings.typeMarkers}
+              onUpdateTypeMarkers={(m) => updateSettings({ typeMarkers: m })}
+              noiseHashes={appSettings.noiseHashes}
+              onUpdateNoiseHashes={(h) => updateSettings({ noiseHashes: h })}
+              storageConfig={appSettings.storageConfig}
+              onUpdateStorageConfig={(c) => updateSettings({ storageConfig: c })}
+              internalDomains={appSettings.internalDomains}
+              onUpdateInternalDomains={(d) => updateSettings({ internalDomains: d })}
+              teamsConfig={appSettings.teamsConfig}
+              onUpdateTeamsConfig={(t) => updateSettings({ teamsConfig: t })}
+            />
+          ) : (
+            <div className="bg-white border border-amber-200 rounded-2xl p-8 text-center space-y-3 shadow-sm">
+              <div className="w-12 h-12 bg-amber-100 text-amber-600 rounded-2xl flex items-center justify-center mx-auto">
+                <ShieldAlert size={28} />
+              </div>
+              <p className="text-base font-bold text-slate-800">Доступ обмежено</p>
+              <p className="text-sm text-slate-500 max-w-md mx-auto">
+                Налаштування довідників доступні лише системним адміністраторам.
+              </p>
+            </div>
+          )
         )}
 
       </main>

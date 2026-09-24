@@ -2,7 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { parseEmlFile } from '../services/emlParser';
 import { parseTestTxt } from '../services/testParser';
 import { checkDuplicateMaterial } from '../services/deduplication';
-import { MaterialItem, ParsedEmail, BrandMapping, TypeMarker, MaterialStatus } from '../types';
+import { verifyResourceLink, LinkVerificationResult } from '../services/linkVerifier';
+import { sendTeamsNotification } from '../services/teamsNotifier';
+import { MaterialItem, ParsedEmail, BrandMapping, TypeMarker, MaterialStatus, TeamsConfig } from '../types';
 import { useMsal } from '@azure/msal-react';
 import { 
   Upload, 
@@ -18,8 +20,24 @@ import {
   Globe,
   PlusCircle,
   X,
-  Check
+  Check,
+  Building2,
+  ExternalLink,
+  AlertTriangle,
+  AlertCircle,
+  Loader2,
+  Search
 } from 'lucide-react';
+
+const DEFAULT_IMPORTERS = [
+  "L'Oréal Ukraine",
+  "Brocard-Ukraine",
+  "Hexagone",
+  "Aromateque",
+  "Селдіс",
+  "БТІ Трейд",
+  "Есті Лаудер Україна",
+];
 
 interface MaterialUploadFormProps {
   onMaterialCreated: (material: MaterialItem) => void;
@@ -28,6 +46,7 @@ interface MaterialUploadFormProps {
   noiseHashes: string[];
   internalDomains: string[];
   existingMaterials: MaterialItem[];
+  teamsConfig?: TeamsConfig;
 }
 
 export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({
@@ -37,6 +56,7 @@ export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({
   noiseHashes,
   internalDomains,
   existingMaterials,
+  teamsConfig,
 }) => {
   const { accounts } = useMsal();
   const activeAccount = accounts[0];
@@ -50,15 +70,40 @@ export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({
   const [type, setType] = useState('Курс');
   const [language, setLanguage] = useState('UKR');
   const [trainer, setTrainer] = useState('');
+  const [importer, setImporter] = useState('');
   const [eventDate, setEventDate] = useState(new Date().toISOString().split('T')[0]);
   const [driveUrl, setDriveUrl] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
 
+  const importerSuggestions = Array.from(
+    new Set([
+      ...DEFAULT_IMPORTERS,
+      ...(existingMaterials?.map(m => m.importer).filter(Boolean) as string[] || []),
+    ])
+  );
+
   // Стан розібраного EML
   const [parsedEmail, setParsedEmail] = useState<ParsedEmail | null>(null);
   const [isProcessingEml, setIsProcessingEml] = useState(false);
   const [confidenceScore, setConfidenceScore] = useState(90);
+
+  // Стан перевірки посилання
+  const [verificationResult, setVerificationResult] = useState<LinkVerificationResult | null>(null);
+  const [isVerifyingLink, setIsVerifyingLink] = useState(false);
+
+  const handleVerifyLink = async () => {
+    if (!driveUrl.trim()) return;
+    setIsVerifyingLink(true);
+    try {
+      const result = await verifyResourceLink(driveUrl);
+      setVerificationResult(result);
+    } catch (e) {
+      console.error('Помилка перевірки посилання:', e);
+    } finally {
+      setIsVerifyingLink(false);
+    }
+  };
 
   useEffect(() => {
     if (activeAccount && !trainer) {
@@ -92,7 +137,8 @@ export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({
         setBrand(mat.brand || brands[0]?.brandName || 'Lancôme');
         setType(mat.type || 'Курс');
         setLanguage(mat.language || 'UKR');
-        if (mat.trainerSource) setTrainer(mat.trainerSource);
+        if (mat.trainer || mat.trainerSource) setTrainer(mat.trainer || mat.trainerSource);
+        if (mat.importer) setImporter(mat.importer);
         if (mat.eventDate) setEventDate(mat.eventDate);
         setConfidenceScore(mat.confidenceScore || 85);
       }
@@ -100,6 +146,7 @@ export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({
       const gDrive = email.links.find(l => l.type === 'gdrive');
       if (gDrive) {
         setDriveUrl(gDrive.cleanUrl);
+        verifyResourceLink(gDrive.cleanUrl).then(setVerificationResult).catch(() => {});
       }
 
     } catch (e) {
@@ -155,9 +202,11 @@ export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({
     const isUnc = driveUrl.startsWith('\\\\');
     const hasAttachedFile = files.length > 0;
 
-    // 0.3 Статус PendingAccess якщо доступний тільки за посиланням/UNC без локального файла
+    // 0.3 Статус PendingAccess якщо доступний тільки за посиланням/UNC без локального файла або якщо доступ обмежений
     let initialStatus: MaterialStatus = 'Parsed';
     if (!hasAttachedFile && (gdriveId || isUnc || externalUrl)) {
+      initialStatus = 'PendingAccess';
+    } else if (verificationResult?.status === 'restricted' || verificationResult?.status === 'unc_network') {
       initialStatus = 'PendingAccess';
     }
 
@@ -171,7 +220,9 @@ export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({
       language,
       eventDate,
       receiveDate: new Date().toISOString().split('T')[0],
-      trainerSource: trainer || activeAccount?.name || 'Адміністратор',
+      trainer: trainer.trim(),
+      importer: importer.trim(),
+      trainerSource: trainer.trim() || activeAccount?.name || 'Адміністратор',
       confidenceScore: uploadMode === 'eml' ? confidenceScore : 100,
       status: initialStatus,
       sourceEmailId: parsedEmail ? parsedEmail.internetMessageId : 'manual_entry',
@@ -187,20 +238,35 @@ export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({
       testData,
       fileSizeBytes: firstFile ? firstFile.size : undefined,
       category: 'material',
+      linkVerificationStatus: verificationResult?.status,
     };
 
     // 0.2 Перевірка дублікатів (gdriveId, sha256, URL, UNC)
     const dedupResult = checkDuplicateMaterial(draftMaterial, existingMaterials);
+
+    let finalRemarks: string | undefined = undefined;
+    if (dedupResult.isDuplicate) {
+      finalRemarks = dedupResult.duplicateReason;
+    } else if (verificationResult?.status === 'restricted' || verificationResult?.status === 'unc_network') {
+      finalRemarks = `${verificationResult.message} ${verificationResult.suggestedAction || ''}`.trim();
+    }
 
     const newMaterial: MaterialItem = {
       ...draftMaterial as MaterialItem,
       id: `mat_${Math.random().toString(36).substring(2, 9)}`,
       isDuplicate: dedupResult.isDuplicate,
       duplicateOfId: dedupResult.duplicateOfId,
-      remarks: dedupResult.isDuplicate ? dedupResult.duplicateReason : undefined,
+      remarks: finalRemarks,
     };
 
     onMaterialCreated(newMaterial);
+
+    // Фонова відправка сповіщення в канал Microsoft Teams
+    if (teamsConfig?.enabled && teamsConfig.webhookUrl) {
+      sendTeamsNotification(newMaterial, teamsConfig).catch(err => {
+        console.warn('Помилка відправки сповіщення в Teams:', err);
+      });
+    }
 
     if (dedupResult.isDuplicate) {
       alert(`Увага! Матеріал позначено як ДУБЛІКАТ: ${dedupResult.duplicateReason}`);
@@ -213,6 +279,8 @@ export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({
     setFiles([]);
     setDriveUrl('');
     setParsedEmail(null);
+    setImporter('');
+    setVerificationResult(null);
   };
 
   return (
@@ -387,16 +455,37 @@ export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({
           {/* Тренер */}
           <div className="space-y-2">
             <label className="block text-sm font-semibold text-slate-700 flex items-center gap-1.5">
-              <UserCheck size={16} className="text-slate-400" /> Хто тренер / Постачальник
+              <UserCheck size={16} className="text-slate-400" /> Тренер
             </label>
             <input
               type="text"
               required
               value={trainer}
               onChange={(e) => setTrainer(e.target.value)}
-              placeholder="Ім'я та прізвище або email відправника"
+              placeholder="Ім'я та прізвище або email тренера"
               className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm transition"
             />
+          </div>
+
+          {/* Імпортер / Бренд-дистриб'ютор */}
+          <div className="space-y-2">
+            <label className="block text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+              <Building2 size={16} className="text-slate-400" /> Імпортер / Бренд-дистриб'ютор
+            </label>
+            <input
+              type="text"
+              required
+              list="importer-suggestions"
+              value={importer}
+              onChange={(e) => setImporter(e.target.value)}
+              placeholder="Введіть або оберіть зі списку (напр. L'Oréal Ukraine, Brocard)"
+              className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm transition"
+            />
+            <datalist id="importer-suggestions">
+              {importerSuggestions.map((item) => (
+                <option key={item} value={item} />
+              ))}
+            </datalist>
           </div>
 
           {/* Дата події */}
@@ -415,17 +504,107 @@ export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({
         </div>
 
         {/* Зовнішні посилання */}
-        <div className="space-y-2 border-t pt-6">
-          <label className="block text-sm font-semibold text-slate-700 flex items-center gap-1.5">
-            <Link2 size={16} className="text-slate-400" /> Посилання на зовнішній контент (Google Drive, YouTube вебінар, UNC-шара тощо)
-          </label>
-          <input
-            type="text"
-            value={driveUrl}
-            onChange={(e) => setDriveUrl(e.target.value)}
-            placeholder="https://youtube.com/watch?v=... або https://drive.google.com/... або \\fs1\projects\..."
-            className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm font-mono transition"
-          />
+        <div className="space-y-3 border-t pt-6">
+          <div className="flex items-center justify-between">
+            <label className="block text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+              <Link2 size={16} className="text-slate-400" /> Посилання на зовнішній контент (Google Drive, YouTube вебінар, UNC-шара тощо)
+            </label>
+            {driveUrl && (
+              <span className="text-xs text-slate-400 font-mono">
+                {driveUrl.startsWith('\\\\') ? 'UNC мережевий шлях' : 'Веб-посилання'}
+              </span>
+            )}
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+            <div className="relative flex-1">
+              <input
+                type="text"
+                value={driveUrl}
+                onChange={(e) => {
+                  setDriveUrl(e.target.value);
+                  if (verificationResult) setVerificationResult(null);
+                }}
+                placeholder="https://youtube.com/watch?v=... або https://drive.google.com/... або \\fs1\projects\..."
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm font-mono transition"
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={handleVerifyLink}
+              disabled={!driveUrl.trim() || isVerifyingLink}
+              className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2.5 rounded-xl text-xs font-semibold transition disabled:opacity-50 flex items-center justify-center gap-1.5 shrink-0 border border-slate-200 shadow-sm cursor-pointer"
+            >
+              {isVerifyingLink ? (
+                <>
+                  <Loader2 size={14} className="animate-spin text-blue-600" />
+                  <span>Перевірка...</span>
+                </>
+              ) : (
+                <>
+                  <Search size={14} className="text-slate-500" />
+                  <span>Перевірити доступ</span>
+                </>
+              )}
+            </button>
+
+            {driveUrl && !driveUrl.startsWith('\\\\') && (
+              <a
+                href={driveUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="bg-blue-50 hover:bg-blue-100 text-blue-700 px-3 py-2.5 rounded-xl text-xs font-semibold transition flex items-center justify-center gap-1 shrink-0 border border-blue-200"
+                title="Відкрити посилання у новій вкладці"
+              >
+                <ExternalLink size={14} />
+                <span className="hidden sm:inline">Відкрити</span>
+              </a>
+            )}
+          </div>
+
+          {/* Результат перевірки посилання */}
+          {verificationResult && (
+            <div className={`p-3.5 rounded-xl border text-xs flex items-start gap-2.5 transition-all ${
+              verificationResult.status === 'accessible'
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                : verificationResult.status === 'restricted'
+                ? 'bg-amber-50 border-amber-200 text-amber-900'
+                : verificationResult.status === 'unc_network'
+                ? 'bg-purple-50 border-purple-200 text-purple-900'
+                : verificationResult.status === 'invalid'
+                ? 'bg-rose-50 border-rose-200 text-rose-900'
+                : 'bg-slate-50 border-slate-200 text-slate-800'
+            }`}>
+              <div className="mt-0.5 shrink-0">
+                {verificationResult.status === 'accessible' && <CheckCircle2 size={16} className="text-emerald-600" />}
+                {verificationResult.status === 'restricted' && <AlertTriangle size={16} className="text-amber-600" />}
+                {verificationResult.status === 'unc_network' && <AlertCircle size={16} className="text-purple-600" />}
+                {verificationResult.status === 'invalid' && <X size={16} className="text-rose-600" />}
+                {verificationResult.status === 'unknown' && <ExternalLink size={16} className="text-slate-500" />}
+              </div>
+              <div className="space-y-0.5 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="font-bold">
+                    {verificationResult.status === 'accessible' && '✅ Доступ відкрито'}
+                    {verificationResult.status === 'restricted' && '⚠️ Потрібен дозвіл на доступ'}
+                    {verificationResult.status === 'unc_network' && '🏢 Корпоративна мережа (UNC)'}
+                    {verificationResult.status === 'invalid' && '❌ Недійсне посилання'}
+                    {verificationResult.status === 'unknown' && 'ℹ️ Зовнішнє посилання'}
+                  </span>
+                  {verificationResult.title && (
+                    <span className="bg-white/60 px-1.5 py-0.5 rounded font-medium truncate max-w-xs">
+                      {verificationResult.title}
+                    </span>
+                  )}
+                </div>
+                <p className="leading-relaxed">{verificationResult.message}</p>
+                {verificationResult.suggestedAction && (
+                  <p className="opacity-80 italic mt-0.5 text-[11px]">{verificationResult.suggestedAction}</p>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Файли */}
@@ -479,7 +658,7 @@ export const MaterialUploadForm: React.FC<MaterialUploadFormProps> = ({
         <div className="flex justify-end pt-4 border-t">
           <button
             type="submit"
-            disabled={!title || !trainer}
+            disabled={!title || !trainer.trim() || !importer.trim()}
             className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-xl font-semibold text-sm transition disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg flex items-center gap-2"
           >
             <Check size={18} />

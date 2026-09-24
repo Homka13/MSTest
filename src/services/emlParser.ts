@@ -155,6 +155,8 @@ export async function parseEmlFile(
       language: classification.language,
       eventDate: classification.eventDate,
       receiveDate,
+      trainer: sender.actualSender,
+      importer: '',
       trainerSource: sender.actualSender,
       confidenceScore: classification.confidenceScore,
       status: initialStatus,

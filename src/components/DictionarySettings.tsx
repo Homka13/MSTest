@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { BrandMapping, TypeMarker, StorageConfig } from '../types';
-import { Settings, Plus, Trash2, Tag, ShieldAlert, HardDrive, CheckCircle2, Cloud, Globe } from 'lucide-react';
+import { BrandMapping, TypeMarker, StorageConfig, TeamsConfig } from '../types';
+import { sendTeamsTestNotification } from '../services/teamsNotifier';
+import { Settings, Plus, Trash2, Tag, ShieldAlert, HardDrive, CheckCircle2, Cloud, Globe, Bell, Send, Loader2, AlertCircle } from 'lucide-react';
 
 interface DictionarySettingsProps {
   brands: BrandMapping[];
@@ -13,6 +14,8 @@ interface DictionarySettingsProps {
   onUpdateStorageConfig: (config: StorageConfig) => void;
   internalDomains: string[];
   onUpdateInternalDomains: (domains: string[]) => void;
+  teamsConfig: TeamsConfig;
+  onUpdateTeamsConfig: (config: TeamsConfig) => void;
 }
 
 export const DictionarySettings: React.FC<DictionarySettingsProps> = ({
@@ -26,11 +29,35 @@ export const DictionarySettings: React.FC<DictionarySettingsProps> = ({
   onUpdateStorageConfig,
   internalDomains,
   onUpdateInternalDomains,
+  teamsConfig,
+  onUpdateTeamsConfig,
 }) => {
   const [newBrand, setNewBrand] = useState({ brandName: '', domainOrKeyword: '', aliasesStr: '' });
   const [newMarker, setNewMarker] = useState({ keyword: '', typeName: 'Курс', priority: 10 });
   const [newHash, setNewHash] = useState('');
   const [newDomain, setNewDomain] = useState('');
+
+  // Стан тестування Teams Webhook
+  const [isTestingTeams, setIsTestingTeams] = useState(false);
+  const [teamsTestResult, setTeamsTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  const handleTestTeams = async () => {
+    if (!teamsConfig.webhookUrl?.trim()) return;
+    setIsTestingTeams(true);
+    setTeamsTestResult(null);
+    try {
+      const res = await sendTeamsTestNotification(teamsConfig.webhookUrl);
+      if (res.success) {
+        setTeamsTestResult({ success: true, message: 'Тестове сповіщення успішно надіслано в Teams!' });
+      } else {
+        setTeamsTestResult({ success: false, message: res.error || 'Помилка надсилання сповіщення' });
+      }
+    } catch (err: any) {
+      setTeamsTestResult({ success: false, message: err?.message || 'Помилка з\'єднання' });
+    } finally {
+      setIsTestingTeams(false);
+    }
+  };
 
   const handleAddBrand = (e: React.FormEvent) => {
     e.preventDefault();
@@ -183,6 +210,90 @@ export const DictionarySettings: React.FC<DictionarySettingsProps> = ({
               </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* ІНТЕГРАЦІЯ З MICROSOFT TEAMS (СПОДІЩЕННЯ) */}
+      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+        <div className="flex items-center justify-between border-b pb-3">
+          <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">
+            <Bell size={20} className="text-blue-600" />
+            Інтеграція з Microsoft Teams (Канал сповіщень)
+          </h3>
+
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={teamsConfig.enabled}
+              onChange={e => onUpdateTeamsConfig({ ...teamsConfig, enabled: e.target.checked })}
+              className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 cursor-pointer"
+            />
+            <span className="text-xs font-semibold text-slate-700">Сповіщення увімкнено</span>
+          </label>
+        </div>
+
+        <p className="text-xs text-slate-500">
+          При додаванні нових матеріалів або .eml листів картка з метаданими та посиланнями автоматично надсилатиметься у робочий канал Teams через Incoming Webhook або Power Automate Workflow.
+        </p>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              Teams Webhook URL:
+            </label>
+            <input
+              type="text"
+              placeholder="https://company.webhook.office.com/webhookb2/... або Power Automate Webhook URL"
+              value={teamsConfig.webhookUrl}
+              onChange={e => {
+                onUpdateTeamsConfig({ ...teamsConfig, webhookUrl: e.target.value });
+                if (teamsTestResult) setTeamsTestResult(null);
+              }}
+              className="w-full px-3 py-2 text-xs border rounded-xl font-mono outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+            <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-600">
+              <input
+                type="checkbox"
+                checked={teamsConfig.notifyPendingAccessOnly}
+                onChange={e => onUpdateTeamsConfig({ ...teamsConfig, notifyPendingAccessOnly: e.target.checked })}
+                className="w-3.5 h-3.5 text-blue-600 rounded focus:ring-blue-500 cursor-pointer"
+              />
+              <span>Сповіщати лише якщо матеріал потребує уваги (статус «Очікує доступу»)</span>
+            </label>
+
+            <button
+              type="button"
+              onClick={handleTestTeams}
+              disabled={!teamsConfig.webhookUrl?.trim() || isTestingTeams}
+              className="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 px-4 py-2 rounded-xl text-xs font-semibold transition disabled:opacity-50 flex items-center gap-1.5 cursor-pointer shadow-sm"
+            >
+              {isTestingTeams ? (
+                <>
+                  <Loader2 size={13} className="animate-spin text-blue-600" />
+                  <span>Відправка тесту...</span>
+                </>
+              ) : (
+                <>
+                  <Send size={13} className="text-blue-600" />
+                  <span>🧪 Надіслати тестове сповіщення</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          {teamsTestResult && (
+            <div className={`p-3 rounded-xl border text-xs flex items-center gap-2 ${
+              teamsTestResult.success 
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-900 font-medium'
+                : 'bg-rose-50 border-rose-200 text-rose-900'
+            }`}>
+              {teamsTestResult.success ? <CheckCircle2 size={16} className="text-emerald-600 shrink-0" /> : <AlertCircle size={16} className="text-rose-600 shrink-0" />}
+              <span>{teamsTestResult.message}</span>
+            </div>
+          )}
         </div>
       </div>
 

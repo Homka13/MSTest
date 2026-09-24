@@ -9,7 +9,9 @@ import {
   Sparkles,
   Save,
   Copy,
-  Clock
+  Clock,
+  ExternalLink,
+  Link2
 } from 'lucide-react';
 
 interface VerificationQueueProps {
@@ -182,7 +184,10 @@ export const VerificationQueue: React.FC<VerificationQueueProps> = ({ materials,
               <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-slate-600">
                 <div className="space-y-1">
                   <p><span className="font-semibold text-slate-700">Оригінальний файл:</span> {item.originalName}</p>
-                  <p><span className="font-semibold text-slate-700">Джерело (Тренер):</span> {item.trainerSource}</p>
+                  <p><span className="font-semibold text-slate-700">Тренер:</span> {item.trainer || item.trainerSource || '—'}</p>
+                  {item.importer && (
+                    <p><span className="font-semibold text-slate-700">Імпортер / Дистриб'ютор:</span> {item.importer}</p>
+                  )}
                   <p className="flex items-center gap-1 text-slate-500">
                     <CornerDownRight size={12} className="shrink-0" />
                     <span>Шлях походження: {item.pathOfOrigin}</span>
@@ -218,6 +223,43 @@ export const VerificationQueue: React.FC<VerificationQueueProps> = ({ materials,
                   )}
                 </div>
               </div>
+
+              {/* Блок швидкої дії для статусу PendingAccess */}
+              {item.status === 'PendingAccess' && (
+                <div className="mt-4 p-3.5 bg-purple-50 border border-purple-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                  <div className="flex items-start sm:items-center gap-2 text-purple-900">
+                    <Clock size={16} className="text-purple-600 shrink-0 mt-0.5 sm:mt-0" />
+                    <div>
+                      <p className="font-bold">Очікує підтвердження доступу до ресурсу</p>
+                      <p className="text-purple-700 text-[11px] leading-tight">
+                        {item.remarks || 'Матеріал доступний за зовнішнім посиланням або UNC-шляхом. Перевірте доступ перед затвердженням.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                    {(item.externalUrl || item.gdriveId || item.youtubeId) && (
+                      <a
+                        href={item.externalUrl || (item.gdriveId ? `https://drive.google.com/file/d/${item.gdriveId}/view` : `https://youtube.com/watch?v=${item.youtubeId}`)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="bg-white hover:bg-purple-100 text-purple-800 border border-purple-300 px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1 shadow-sm"
+                      >
+                        <ExternalLink size={12} />
+                        <span>Перевірити ресурс</span>
+                      </a>
+                    )}
+
+                    <button
+                      onClick={() => handleStatusChange(item, 'UnderReview')}
+                      className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-lg font-semibold transition flex items-center gap-1 shadow-sm cursor-pointer"
+                    >
+                      <CheckCircle size={13} />
+                      <span>Доступ підтверджено</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -303,6 +345,57 @@ export const VerificationQueue: React.FC<VerificationQueueProps> = ({ materials,
                     className="w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
                   />
                 </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Тренер</label>
+                  <input
+                    type="text"
+                    value={editingItem.trainer || editingItem.trainerSource || ''}
+                    onChange={(e) => setEditingItem({
+                      ...editingItem,
+                      trainer: e.target.value,
+                      trainerSource: e.target.value,
+                    })}
+                    className="w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Імпортер / Дистриб'ютор</label>
+                  <input
+                    type="text"
+                    value={editingItem.importer || ''}
+                    onChange={(e) => setEditingItem({
+                      ...editingItem,
+                      importer: e.target.value,
+                    })}
+                    className="w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1 flex items-center gap-1.5">
+                  <Link2 size={15} className="text-slate-400" />
+                  Посилання на зовнішній ресурс / UNC-шлях
+                </label>
+                <input
+                  type="text"
+                  value={editingItem.externalUrl || editingItem.uncPath || ''}
+                  onChange={(e) => {
+                    const val = e.target.value.trim();
+                    const isUnc = val.startsWith('\\\\');
+                    setEditingItem({
+                      ...editingItem,
+                      externalUrl: isUnc ? undefined : (val || undefined),
+                      uncPath: isUnc ? val : undefined,
+                    });
+                  }}
+                  placeholder="https://... або \\fs1\share"
+                  className="w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs font-mono"
+                />
               </div>
             </div>
 

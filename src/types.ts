@@ -17,6 +17,12 @@ export interface StorageConfig {
   sharepointLibrary: string;
 }
 
+export interface TeamsConfig {
+  enabled: boolean;
+  webhookUrl: string;
+  notifyPendingAccessOnly: boolean;
+}
+
 export interface TestOption {
   id: string;
   text: string;
@@ -102,6 +108,8 @@ export interface MaterialItem {
   eventDate?: string;
   receiveDate: string;
   trainerSource: string;
+  trainer?: string; // Ім'я та контакти тренера
+  importer?: string; // Імпортер / бренд-дистриб'ютор
   confidenceScore: number; // 0 - 100
   status: MaterialStatus;
   sourceEmailId: string;
@@ -120,6 +128,7 @@ export interface MaterialItem {
   testData?: TestModel;
   fileSizeBytes?: number;
   category: MaterialCategory;
+  linkVerificationStatus?: 'accessible' | 'restricted' | 'unc_network' | 'invalid' | 'unknown';
   remarks?: string;
 }
 
